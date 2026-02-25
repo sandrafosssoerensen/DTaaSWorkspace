@@ -1,0 +1,241 @@
+# Admin Service Documentation
+
+The admin service is a FastAPI-based REST API that provides service discovery
+and management capabilities for the DTaaS workspace.
+
+## Overview
+
+The service runs on port 8091 (configurable via `ADMIN_SERVER_PORT` environment
+variable) and is proxied through nginx. It supports path prefixes for multi-user
+deployments, allowing routes to be accessible at `/{path-prefix}/services`.
+
+## Endpoints
+
+### GET /services
+
+Returns a JSON object containing information about all available workspace
+services.
+
+**Request**:
+
+```bash
+# Without path prefix
+curl http://localhost:8080/services
+
+# With path prefix
+curl http://localhost:8080/{path-prefix}/services
+```
+
+**Response**: Status 200 OK
+
+```json
+{
+  "desktop": {
+    "name": "Desktop",
+    "description": "Virtual Desktop Environment",
+    "endpoint": "tools/vnc?path={PATH_PREFIX}%2Ftools%2Fvnc%2Fwebsockify"
+  },
+  "vscode": {
+    "name": "VS Code",
+    "description": "VS Code IDE",
+    "endpoint": "tools/vscode"
+  },
+  "notebook": {
+    "name": "Jupyter Notebook",
+    "description": "Jupyter Notebook",
+    "endpoint": ""
+  },
+  "lab": {
+    "name": "Jupyter Lab",
+    "description": "Jupyter Lab IDE",
+    "endpoint": "lab"
+  }
+}
+```
+
+**Notes**:
+- Service endpoints are relative paths that should be appended to the base
+  workspace URL
+- When using path prefixes, the prefix is automatically prepended to all routes
+- Empty string endpoints indicate the service is available at the root path
+
+### GET /health
+
+Health check endpoint for monitoring service availability.
+
+**Request**:
+
+```bash
+# Without path prefix
+curl http://localhost:8091/health
+
+# With path prefix  
+curl http://localhost:8091/{path-prefix}/health
+```
+
+**Response**: Status 200 OK
+
+```json
+{
+  "status": "healthy"
+}
+```
+
+### GET /
+
+Root endpoint providing service metadata and available endpoints.
+
+**Request**:
+
+```bash
+# Without path prefix
+curl http://localhost:8091/
+
+# With path prefix
+curl http://localhost:8091/{path-prefix}
+```
+
+**Response**: Status 200 OK
+
+```json
+{
+  "service": "Workspace Admin Service",
+  "version": "0.1.0",
+  "endpoints": {
+    "/services": "Get list of available workspace services",
+    "/health": "Health check endpoint"
+  }
+}
+```
+
+## Architecture
+
+### Service Discovery Flow
+
+1. User accesses `http://{domain}/{path-prefix}/services` (or `/services` without prefix)
+2. nginx receives the request and routes it to the admin service on port 8091
+3. Admin service reads the `services_template.json` file
+4. JSON response is returned to the client
+5. Path prefix is configured via CLI argument when starting the service
+
+### Components
+
+- **FastAPI Application** (`src/admin/main.py`): Core service implementation
+- **Services Template** (`src/admin/services_template.json`): JSON template
+  defining available services
+- **nginx Configuration** (`startup/nginx.conf`): Reverse proxy routing
+- **Startup Script** (`startup/custom_startup.sh`): Service bootstrap and
+  monitoring
+
+## Environment Variables
+
+- `ADMIN_SERVER_PORT`: Port for the admin service (default: `8091`)
+- `PATH_PREFIX`: Optional path prefix for API routes (can also be set via CLI `--path-prefix` argument)
+
+## Development
+
+### Running Tests
+
+```bash
+cd workspaces/src/admin
+poetry install
+poetry run pytest --cov=admin --cov-report=html --cov-report=term-missing
+```
+
+### Code Quality and Coverage
+
+**Run pylint for code quality analysis:**
+
+```bash
+cd workspaces/src/admin
+poetry run pylint src/admin tests
+```
+
+**Run tests with coverage analysis:**
+
+```bash
+cd workspaces/src/admin
+poetry run pytest --cov=admin --cov-report=html --cov-report=term
+```
+
+This will generate a coverage report in `htmlcov/index.html` and display a
+summary in the terminal.
+
+### Running Locally
+
+**As a service:**
+
+```bash
+cd workspaces/src/admin
+export ADMIN_SERVER_PORT=8091
+poetry run workspace-admin --path-prefix dtaas-user
+```
+
+**As a CLI utility:**
+
+```bash
+cd workspaces/src/admin
+poetry install
+
+# Run the service
+poetry run workspace-admin
+
+# Run with custom host and port
+poetry run workspace-admin --host 127.0.0.1 --port 9000
+
+# Run with path prefix for multi-user deployments
+poetry run workspace-admin --path-prefix dtaas-user
+
+# List services without starting the server
+poetry run workspace-admin --list-services
+
+# Run with auto-reload for development
+poetry run workspace-admin --reload
+
+# Show help
+poetry run workspace-admin --help
+```
+
+The CLI interface makes the admin service work like a system utility similar to
+glances, allowing easy command-line operation and service listing.
+
+### Adding New Services
+
+To add a new service to the workspace:
+
+1. Update `services_template.json` with the new service definition:
+
+```json
+{
+  "new_service": {
+    "name": "New Service Name",
+    "description": "Description of the service",
+    "endpoint": "path/to/service"
+  }
+}
+```
+
+2. The service automatically reads and processes the template - no code changes required
+
+## Integration with DTaaS
+
+The `/services` endpoint enables the DTaaS frontend to:
+
+1. Dynamically discover available workspace services
+2. Display service shortcuts to users
+3. Support different workspace configurations without hardcoded service lists
+4. Handle multi-user deployments where each user has different available
+   services
+
+This replaces the previous approach of hardcoding service endpoints in the
+frontend configuration, enabling more flexible workspace deployments.
+
+## Future Enhancements
+
+Potential future enhancements include:
+
+- Service registry for dynamic service registration
+- Authentication and authorization integration
+- Service health monitoring and status reporting
+- Custom service definitions per workspace type
+- Web application firewall integration for zero-trust security

@@ -43,19 +43,19 @@ jobs:
 
       - name: Run flake8
         run: |
-          # Check if any Python files exist
-          if find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" | grep -q .; then
-            flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-            flake8 . --count --max-complexity=10 --max-line-length=127 --statistics
+          # Check if any Python files exist (excluding Poetry projects and venv)
+          if find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" -not -path "./workspaces/src/admin/*" | grep -q .; then
+            flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=./venv/*,./.venv/*,./workspaces/src/admin/*
+            flake8 . --count --max-complexity=10 --max-line-length=127 --statistics --exclude=./venv/*,./.venv/*,./workspaces/src/admin/*
           else
             echo "No Python files found to lint"
           fi
 
       - name: Run pylint
         run: |
-          # Check if any Python files exist
-          if find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" | grep -q .; then
-            find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" | xargs pylint
+          # Check if any Python files exist (excluding Poetry projects and venv)
+          if find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" -not -path "./workspaces/src/admin/*" | grep -q .; then
+            find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" -not -path "./workspaces/src/admin/*" | xargs pylint
           else
             echo "No Python files found to lint"
           fi

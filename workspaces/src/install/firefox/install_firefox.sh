@@ -20,7 +20,7 @@ Pin: release o=LP-PPA-mozillateam
 Pin-Priority: 1001
 ' > /etc/apt/preferences.d/mozilla-firefox
 fi
-apt-get install -y firefox p11-kit-modules
+DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y -o Acquire::ForceIPv4=true firefox p11-kit-modules
 
 # Update firefox to utilize the system certificate store instead of the one that ships with firefox
 rm -f /usr/lib/firefox/libnssckbi.so

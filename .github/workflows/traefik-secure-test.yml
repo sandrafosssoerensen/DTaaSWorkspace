@@ -27,8 +27,8 @@ jobs:
 
       - name: Validate ${{ matrix.compose-file }} syntax
         run: |
-          cp ./dtaas/.env.example ./dtaas/.env
-          docker compose -f ${{ matrix.compose-file }} --env-file dtaas/.env config > /dev/null
+          cp ./workspaces/test/dtaas/config/.env.example ./workspaces/test/dtaas/config/.env
+          docker compose -f workspaces/test/dtaas/${{ matrix.compose-file }} --env-file workspaces/test/dtaas/config/.env config > /dev/null
           echo "✅ ${{ matrix.compose-file }} syntax is valid"
 
   test-traefik-secure:
@@ -47,8 +47,8 @@ jobs:
       - name: Build workspace image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./workspaces
+          file: workspaces/Dockerfile.ubuntu.noble.gnome
           push: false
           load: true
           tags: workspace:latest
@@ -66,23 +66,23 @@ jobs:
       - name: Create DTaaS configuration files
         run: |
           set -e
-          cp ./dtaas/.env.example ./dtaas/.env
-          cp ./dtaas/conf.example ./dtaas/conf
-          cp ./dtaas/client.js.example ./dtaas/client.js
+          cp ./workspaces/test/dtaas/config/.env.example ./workspaces/test/dtaas/config/.env
+          cp ./workspaces/test/dtaas/config/conf.example ./workspaces/test/dtaas/config/conf
+          cp ./workspaces/test/dtaas/config/client.js.example ./workspaces/test/dtaas/config/client.js
 
       - name: Start services
         run: |
-          docker compose -f compose.traefik.secure.yml --env-file dtaas/.env up -d
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env up -d
           echo "⏳ Waiting for services to be ready..."
           sleep 90
 
       - name: Check service health (HTTP)
         run: |
           echo "📊 Checking service status..."
-          docker compose -f compose.traefik.secure.yml --env-file dtaas/.env ps
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env ps
           echo "---"
           # Check if all services are running
-          SERVICES=$(docker compose -f compose.traefik.secure.yml --env-file dtaas/.env ps --format json)
+          SERVICES=$(docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env ps --format json)
           if echo "$SERVICES" | head -1 | grep -q '^\['; then
             # JSON array format
             FAILED=$(echo "$SERVICES" | jq -r '.[] | select(.State != "running") | .Name')
@@ -93,7 +93,7 @@ jobs:
           if [ -n "$FAILED" ]; then
             echo "❌ Some services are not running:"
             echo "$FAILED"
-            docker compose -f compose.traefik.secure.yml --env-file dtaas/.env logs
+            docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env logs
             exit 1
           fi
           echo "✅ All services are running"
@@ -121,15 +121,15 @@ jobs:
 
           if [ $attempt -eq $max_attempts ]; then
               echo "⚠️ Unexpected response code: $response"
-              docker compose -f compose.traefik.secure.yml --env-file dtaas/.env logs traefik
-              docker compose -f compose.traefik.secure.yml --env-file dtaas/.env logs traefik-forward-auth
+              docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env logs traefik
+              docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env logs traefik-forward-auth
               exit 1
           fi
 
       - name: Cleanup (HTTP)
         if: always()
         run: |
-          docker compose -f compose.traefik.secure.yml --env-file dtaas/.env down -v
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env down -v
           docker system prune -f
 
   test-traefik-secure-tls:
@@ -148,8 +148,8 @@ jobs:
       - name: Build workspace image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83  # v6.18.0
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./workspaces
+          file: workspaces/Dockerfile.ubuntu.noble.gnome
           push: false
           load: true
           tags: workspace:latest
@@ -158,20 +158,20 @@ jobs:
 
       - name: Generate self-signed certificates for testing
         run: |
-          mkdir -p certs
+          mkdir -p workspaces/test/dtaas/certs
           openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-            -keyout certs/privkey.pem \
-            -out certs/fullchain.pem \
+            -keyout workspaces/test/dtaas/certs/privkey.pem \
+            -out workspaces/test/dtaas/certs/fullchain.pem \
             -subj "/C=US/ST=Test/L=Test/O=Test/CN=localhost"
-          chmod 644 certs/fullchain.pem
-          chmod 600 certs/privkey.pem
+          chmod 644 workspaces/test/dtaas/certs/fullchain.pem
+          chmod 600 workspaces/test/dtaas/certs/privkey.pem
           echo "✅ Self-signed certificates generated"
 
       - name: Verify TLS configuration file
         run: |
-          if [ -f dynamic/tls.yml ]; then
+          if [ -f workspaces/test/dtaas/dynamic/tls.yml ]; then
             echo "✅ TLS configuration file exists"
-            cat dynamic/tls.yml
+            cat workspaces/test/dtaas/dynamic/tls.yml
           else
             echo "❌ TLS configuration file not found"
             exit 1
@@ -180,10 +180,10 @@ jobs:
       - name: Create DTaaS configuration files
         run: |
           set -e
-          cp ./dtaas/.env.example ./dtaas/.env
-          sed -i 's/yourdomain.com/localhost/g' ./dtaas/.env
-          cp ./dtaas/conf.example ./dtaas/conf
-          cp ./dtaas/client.js.example ./dtaas/client.js
+          cp ./workspaces/test/dtaas/config/.env.example ./workspaces/test/dtaas/config/.env
+          sed -i 's/yourdomain.com/localhost/g' ./workspaces/test/dtaas/config/.env
+          cp ./workspaces/test/dtaas/config/conf.example ./workspaces/test/dtaas/config/conf
+          cp ./workspaces/test/dtaas/config/client.js.example ./workspaces/test/dtaas/config/client.js
 
       - name: Pull the docker images used in compose files
         run: |
@@ -195,17 +195,17 @@ jobs:
 
       - name: Start Traefik and workspace services (TLS)
         run: |
-          docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env up -d
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env up -d
           echo "⏳ Waiting for services to be ready..."
           sleep 180
 
       - name: Check service health (TLS)
         run: |
           echo "📊 Checking service status..."
-          docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env ps
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env ps
           echo "---"
           # Check if all services are running
-          SERVICES=$(docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env ps --format json)
+          SERVICES=$(docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env ps --format json)
           if echo "$SERVICES" | head -1 | grep -q '^\['; then
             # JSON array format
             FAILED=$(echo "$SERVICES" | jq -r '.[] | select(.State != "running") | .Name')
@@ -246,8 +246,8 @@ jobs:
 
           if [ $attempt -eq $max_attempts ]; then
             echo "⚠️ HTTPS connectivity issues, checking logs..."
-            docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env logs traefik
-            docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env logs traefik-forward-auth
+            docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env logs traefik
+            docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env logs traefik-forward-auth
             exit 1
           fi
 
@@ -267,21 +267,21 @@ jobs:
       - name: Verify TLS certificate is loaded
         run: |
           echo "Checking Traefik logs for TLS certificate loading..."
-          docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env logs traefik | \
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env logs traefik | \
             grep -i "certificate" || echo "No certificate messages in logs"
 
       - name: Show service logs on failure
         if: failure()
         run: |
           echo "=== Traefik Logs ==="
-          docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env logs traefik
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env logs traefik
           echo "=== Traefik Forward Auth Logs ==="
-          docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env logs traefik-forward-auth
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env logs traefik-forward-auth
           echo "=== User1 Logs ==="
-          docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env logs user1 | tail -50
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env logs user1 | tail -50
       - name: Cleanup (TLS)
         if: always()
         run: |
-          docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env down -v
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env down -v
           docker system prune -f
-          rm -rf certs/*.pem
+          rm -rf workspaces/test/dtaas/certs/*.pem

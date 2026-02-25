@@ -66,3 +66,12 @@ call(
     + NGINX_FILE,
     shell=True
 )
+
+admin_server_port = os.getenv("ADMIN_SERVER_PORT")
+call(
+    "sed -i 's@{ADMIN_SERVER_PORT}@"
+    + admin_server_port
+    + "@g' "
+    + NGINX_FILE,
+    shell=True
+)

@@ -9,7 +9,7 @@ The workspace Docker image is automatically published to two container
 registries when all quality checks pass:
 
 - **GitHub Container Registry (GHCR)**: `ghcr.io/into-cps-association/workspace`
-- **Docker Hub**: `intocpsassociation/workspace`
+- **Docker Hub**: `intocps/workspace`
 
 ## Workflow Trigger
 
@@ -47,6 +47,10 @@ configure these secrets in GitHub repository settings
      4. Give it a descriptive name (e.g., "GitHub Actions - workspace")
      5. Set permissions to "Read & Write"
      6. Copy the generated token (shown only once)
+
+3. **DOCKERHUB_SCOPE**
+   - The Dockerhub scope that the image should be saved in.
+   - Example: if it should be saved in `hub.docker.com/r/intocps/workspace`, then `intocps` would be the scope.
 
 ### Docker Hub Repository
 
@@ -115,7 +119,7 @@ Users can pull and use the published images without cloning this repository:
 docker pull ghcr.io/into-cps-association/workspace:latest
 
 # From Docker Hub
-docker pull intocpsassociation/workspace:latest
+docker pull intocps/workspace:latest
 ```
 
 See [README.md](README.md) and [TRAEFIK.md](TRAEFIK.md) for complete usage
@@ -156,7 +160,7 @@ This may indicate an issue with the published image. Check:
 
 ## Version Management
 
-The image version is currently set to `1.0.0` in the Dockerfile labels. To
+The image version is currently set to `0.1.0` in the Dockerfile labels. To
 update the version:
 
 1. Edit the `org.opencontainers.image.version` label in `Dockerfile`

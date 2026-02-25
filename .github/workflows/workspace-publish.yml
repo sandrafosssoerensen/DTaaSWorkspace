@@ -15,7 +15,7 @@ name: Publish Workspace Docker Image
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag for the image (e.g., 1.0.0)'
+        description: 'Version tag for the image (e.g., 0.1.0)'
         required: false
         default: 'latest'
 
@@ -113,8 +113,8 @@ jobs:
       - name: Build and push to GHCR
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./workspaces
+          file: workspaces/Dockerfile.ubuntu.noble.gnome
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -154,8 +154,8 @@ jobs:
       - name: Build and push to Docker Hub
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./workspaces
+          file: workspaces/Dockerfile.ubuntu.noble.gnome
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -175,7 +175,7 @@ jobs:
           - name: ghcr
             image: ghcr.io/${{ github.repository }}
           - name: dockerhub
-            image: ${{ secrets.DOCKERHUB_SCOPE }}/workspace
+            image: IMAGE_NAME_DEFINED_AT_RUNTIME
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
@@ -197,6 +197,11 @@ jobs:
             IMAGE="${IMAGE@L}"  # Bash 4+ lowercase expansion
           fi
 
+          # Use DOCKERHUB_SCOPE secret for Docker Hub images
+          if [[ "${{ matrix.registry.name }}" == "dockerhub" ]]; then
+            IMAGE="${{ secrets.DOCKERHUB_SCOPE }}/workspace"
+          fi
+
           echo "📥 Pulling image: ${IMAGE}:latest"
           docker pull "${IMAGE}:latest"
           docker tag "${IMAGE}:latest" workspace:latest
@@ -204,17 +209,17 @@ jobs:
 
       - name: Start Traefik and workspace services
         run: |
-          docker compose -f compose.traefik.yml up -d
+          docker compose -f workspaces/test/dtaas/compose.traefik.yml up -d
           echo "⏳ Waiting for services to be ready..."
           sleep 30
 
       - name: Check service health
         run: |
           echo "📊 Checking service status..."
-          docker compose -f compose.traefik.yml ps
+          docker compose -f workspaces/test/dtaas/compose.traefik.yml ps
           echo "---"
           # Check if all services are running
-          SERVICES=$(docker compose -f compose.traefik.yml ps --format json)
+          SERVICES=$(docker compose -f workspaces/test/dtaas/compose.traefik.yml ps --format json)
           if echo "$SERVICES" | head -1 | grep -q '^\['; then
             # JSON array format
             FAILED=$(echo "$SERVICES" | jq -r '.[] | select(.State != "running") | .Name')
@@ -251,14 +256,14 @@ jobs:
 
           if [ $attempt -eq $max_attempts ]; then
             echo "⚠️ Workspace not fully accessible, checking service health..."
-            docker compose -f compose.traefik.yml ps
-            docker compose -f compose.traefik.yml logs --tail=50 traefik
-            docker compose -f compose.traefik.yml logs --tail=50 user1
+            docker compose -f workspaces/test/dtaas/compose.traefik.yml ps
+            docker compose -f workspaces/test/dtaas/compose.traefik.yml logs --tail=50 traefik
+            docker compose -f workspaces/test/dtaas/compose.traefik.yml logs --tail=50 user1
             echo "Note: Workspace may need more time to fully initialize"
           fi
 
       - name: Cleanup
         if: always()
         run: |
-          docker compose -f compose.traefik.yml down -v
+          docker compose -f workspaces/test/dtaas/compose.traefik.yml down -v
           docker system prune -f

@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "workspace-admin"
+version = "0.1.0"
+description = "Admin service for DTaaS workspace service discovery"
+authors = ["INTO-CPS Association"]
+readme = "README.md"
+packages = [{include = "admin", from = "src"}]
+
+[tool.poetry.scripts]
+workspace-admin = "admin.main:cli"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+httpx = "^0.28.0"
+pylint = "^4.0.4"
+pytest-cov = "^7.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

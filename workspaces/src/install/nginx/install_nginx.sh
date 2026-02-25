@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -xe
 
-apt-get install -y curl gnupg2 ca-certificates lsb-release ubuntu-keyring
+DEBIAN_FRONTEND=noninteractive apt-get install -y curl gnupg2 ca-certificates lsb-release ubuntu-keyring
 
 curl https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
     | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
@@ -13,7 +13,7 @@ http://nginx.org/packages/ubuntu $(lsb_release -cs) nginx" \
 echo -e "Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n" \
     | tee /etc/apt/preferences.d/99nginx
 
-apt-get update && apt-get install -y nginx
+DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y nginx
 
 mkdir -p "${HOME}/.nginx/logs"
 mkdir -p "${HOME}/.nginx/temp"

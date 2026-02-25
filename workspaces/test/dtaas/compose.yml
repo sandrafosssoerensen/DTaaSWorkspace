@@ -3,12 +3,12 @@ services:
     image: workspace:latest
     container_name: workspace
     build:
-      context: ../../
+      context: ../..
       dockerfile: Dockerfile.ubuntu.noble.gnome
     environment:
       - MAIN_USER=${USERNAME1:-user1}
     ports:
-      - "8080:8080"
+      - "80:8080"
     shm_size: 512m
     volumes:
       - ./files/user1:/workspace
