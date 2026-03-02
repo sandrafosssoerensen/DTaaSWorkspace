@@ -28,6 +28,11 @@ jobs:
       - name: Validate ${{ matrix.compose-file }} syntax
         run: |
           cp ./workspaces/test/dtaas/config/.env.example ./workspaces/test/dtaas/config/.env
+          # Replace placeholder values with CI/CD test values
+          sed -i 's|your_keycloak_client_secret_here|test-client-secret-ci|g' ./workspaces/test/dtaas/config/.env
+          sed -i 's|your_random_secret_key_here|test-oauth-secret-ci|g' ./workspaces/test/dtaas/config/.env
+          sed -i 's|http://foo.com/auth/realms/dtaas|http://keycloak:8080/auth/realms/dtaas|g' ./workspaces/test/dtaas/config/.env
+          sed -i 's|SERVER_DNS=foo.com|SERVER_DNS=localhost|g' ./workspaces/test/dtaas/config/.env
           docker compose -f workspaces/test/dtaas/${{ matrix.compose-file }} --env-file workspaces/test/dtaas/config/.env config > /dev/null
           echo "✅ ${{ matrix.compose-file }} syntax is valid"
 
@@ -67,6 +72,11 @@ jobs:
         run: |
           set -e
           cp ./workspaces/test/dtaas/config/.env.example ./workspaces/test/dtaas/config/.env
+          # Replace placeholder values with CI/CD test values
+          sed -i 's|your_keycloak_client_secret_here|test-client-secret-ci|g' ./workspaces/test/dtaas/config/.env
+          sed -i 's|your_random_secret_key_here|test-oauth-secret-ci|g' ./workspaces/test/dtaas/config/.env
+          sed -i 's|http://foo.com/auth/realms/dtaas|http://keycloak:8080/auth/realms/dtaas|g' ./workspaces/test/dtaas/config/.env
+          sed -i 's|SERVER_DNS=foo.com|SERVER_DNS=localhost|g' ./workspaces/test/dtaas/config/.env
           cp ./workspaces/test/dtaas/config/conf.example ./workspaces/test/dtaas/config/conf
           cp ./workspaces/test/dtaas/config/client.js.example ./workspaces/test/dtaas/config/client.js
 
@@ -181,7 +191,11 @@ jobs:
         run: |
           set -e
           cp ./workspaces/test/dtaas/config/.env.example ./workspaces/test/dtaas/config/.env
-          sed -i 's/yourdomain.com/localhost/g' ./workspaces/test/dtaas/config/.env
+          # Replace placeholder values with CI/CD test values
+          sed -i 's|your_keycloak_client_secret_here|test-client-secret-ci|g' ./workspaces/test/dtaas/config/.env
+          sed -i 's|your_random_secret_key_here|test-oauth-secret-ci|g' ./workspaces/test/dtaas/config/.env
+          sed -i 's|http://foo.com/auth/realms/dtaas|http://keycloak:8080/auth/realms/dtaas|g' ./workspaces/test/dtaas/config/.env
+          sed -i 's|SERVER_DNS=foo.com|SERVER_DNS=localhost|g' ./workspaces/test/dtaas/config/.env
           cp ./workspaces/test/dtaas/config/conf.example ./workspaces/test/dtaas/config/conf
           cp ./workspaces/test/dtaas/config/client.js.example ./workspaces/test/dtaas/config/client.js
 
