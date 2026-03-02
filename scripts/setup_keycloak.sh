@@ -23,7 +23,7 @@ echo ""
 
 # Wait for Keycloak to be ready
 echo "⏳ Waiting for Keycloak to be ready..."
-MAX_RETRIES=30
+MAX_RETRIES=60
 RETRY_COUNT=0
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     if curl -sf "$KEYCLOAK_URL/realms/master" > /dev/null 2>&1; then
@@ -31,12 +31,18 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         break
     fi
     RETRY_COUNT=$((RETRY_COUNT + 1))
-    echo "   Attempt $RETRY_COUNT/$MAX_RETRIES..."
+    if [ $((RETRY_COUNT % 6)) -eq 0 ]; then
+        echo "   Attempt $RETRY_COUNT/$MAX_RETRIES (waiting $(($MAX_RETRIES - $RETRY_COUNT)) more attempts)..."
+    fi
     sleep 2
 done
 
 if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-    echo "❌ Keycloak failed to become ready"
+    echo ""
+    echo "❌ Keycloak failed to become ready after $(($MAX_RETRIES * 2)) seconds"
+    echo "💡 Debugging information:"
+    curl -v "$KEYCLOAK_URL/realms/master" 2>&1 | head -20 || true
+    echo ""
     exit 1
 fi
 
