@@ -42,6 +42,14 @@ jobs:
     needs: validate-compose
     permissions:
       contents: read
+    env:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KEYCLOAK_REALM: dtaas
+      KEYCLOAK_CLIENT_ID: dtaas-workspace
+      KEYCLOAK_CLIENT_SECRET: test-client-secret-ci
+      OAUTH_SECRET: test-oauth-secret-ci
+      SERVER_DNS: localhost
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
@@ -72,33 +80,51 @@ jobs:
         run: |
           set -e
           cp ./workspaces/test/dtaas/config/.env.example ./workspaces/test/dtaas/config/.env
-          # Replace placeholder values with CI/CD test values
-          sed -i 's|your_keycloak_client_secret_here|test-client-secret-ci|g' ./workspaces/test/dtaas/config/.env
-          sed -i 's|your_random_secret_key_here|test-oauth-secret-ci|g' ./workspaces/test/dtaas/config/.env
-          sed -i 's|http://foo.com/auth/realms/dtaas|http://keycloak:8080/auth/realms/dtaas|g' ./workspaces/test/dtaas/config/.env
-          sed -i 's|SERVER_DNS=foo.com|SERVER_DNS=localhost|g' ./workspaces/test/dtaas/config/.env
+          # Replace placeholder values with CI/CD test values from environment
+          sed -i "s|your_keycloak_client_secret_here|${KEYCLOAK_CLIENT_SECRET}|g" ./workspaces/test/dtaas/config/.env
+          sed -i "s|your_random_secret_key_here|${OAUTH_SECRET}|g" ./workspaces/test/dtaas/config/.env
+          sed -i "s|http://foo.com/auth/realms/dtaas|http://keycloak:8080/auth/realms/${KEYCLOAK_REALM}|g" ./workspaces/test/dtaas/config/.env
+          sed -i "s|SERVER_DNS=foo.com|SERVER_DNS=${SERVER_DNS}|g" ./workspaces/test/dtaas/config/.env
           cp ./workspaces/test/dtaas/config/conf.example ./workspaces/test/dtaas/config/conf
           cp ./workspaces/test/dtaas/config/client.js.example ./workspaces/test/dtaas/config/client.js
 
       - name: Start services
         run: |
           docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env up -d
-          echo "⏳ Waiting for services to be ready..."
-          sleep 90
+          echo "⏳ Waiting for Keycloak to be ready..."
+          sleep 30
+
+      - name: Setup Keycloak realm and client
+        run: |
+          chmod +x ./scripts/setup_keycloak.sh
+          # Load environment variables from .env file
+          set -a
+          source workspaces/test/dtaas/config/.env
+          set +a
+          # Run setup script with values from .env
+          KEYCLOAK_URL=http://localhost:8080/auth \
+          REDIRECT_URI="http://localhost/_oauth/*" \
+          WEB_ORIGINS="http://localhost" \
+          ./scripts/setup_keycloak.sh
+          echo "⏳ Waiting for all services to stabilize..."
+          sleep 30
+          # Restart traefik-forward-auth to pick up the new realm
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env restart traefik-forward-auth
+          sleep 15
 
       - name: Check service health (HTTP)
         run: |
           echo "📊 Checking service status..."
           docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env ps
           echo "---"
-          # Check if critical services are running (exclude traefik-forward-auth as it requires manual Keycloak realm setup)
+          # Check if all services are running
           SERVICES=$(docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env ps --format json)
           if echo "$SERVICES" | head -1 | grep -q '^\['; then
             # JSON array format
-            FAILED=$(echo "$SERVICES" | jq -r '.[] | select(.State != "running") | select(.Name | contains("traefik-forward-auth") | not) | .Name')
+            FAILED=$(echo "$SERVICES" | jq -r '.[] | select(.State != "running") | .Name')
           else
             # Newline-delimited JSON format
-            FAILED=$(echo "$SERVICES" | jq -r 'select(.State != "running") | select(.Name | contains("traefik-forward-auth") | not) | .Name')
+            FAILED=$(echo "$SERVICES" | jq -r 'select(.State != "running") | .Name')
           fi
           if [ -n "$FAILED" ]; then
             echo "❌ Some services are not running:"
@@ -106,11 +132,7 @@ jobs:
             docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env logs
             exit 1
           fi
-          # Log traefik-forward-auth status separately (expected to fail without Keycloak realm)
-          echo ""
-          echo "ℹ️  Note: traefik-forward-auth requires manual Keycloak realm setup (see KEYCLOAK_SETUP.md)"
-          docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env ps traefik-forward-auth || true
-          echo "✅ Critical services are running"
+          echo "✅ All services are running"
 
       - name: Test service accessibility (HTTP)
         run: |
@@ -152,6 +174,14 @@ jobs:
     needs: validate-compose
     permissions:
       contents: read
+    env:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KEYCLOAK_REALM: dtaas
+      KEYCLOAK_CLIENT_ID: dtaas-workspace
+      KEYCLOAK_CLIENT_SECRET: test-client-secret-ci
+      OAUTH_SECRET: test-oauth-secret-ci
+      SERVER_DNS: localhost
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
@@ -195,11 +225,11 @@ jobs:
         run: |
           set -e
           cp ./workspaces/test/dtaas/config/.env.example ./workspaces/test/dtaas/config/.env
-          # Replace placeholder values with CI/CD test values
-          sed -i 's|your_keycloak_client_secret_here|test-client-secret-ci|g' ./workspaces/test/dtaas/config/.env
-          sed -i 's|your_random_secret_key_here|test-oauth-secret-ci|g' ./workspaces/test/dtaas/config/.env
-          sed -i 's|http://foo.com/auth/realms/dtaas|http://keycloak:8080/auth/realms/dtaas|g' ./workspaces/test/dtaas/config/.env
-          sed -i 's|SERVER_DNS=foo.com|SERVER_DNS=localhost|g' ./workspaces/test/dtaas/config/.env
+          # Replace placeholder values with CI/CD test values from environment
+          sed -i "s|your_keycloak_client_secret_here|${KEYCLOAK_CLIENT_SECRET}|g" ./workspaces/test/dtaas/config/.env
+          sed -i "s|your_random_secret_key_here|${OAUTH_SECRET}|g" ./workspaces/test/dtaas/config/.env
+          sed -i "s|http://foo.com/auth/realms/dtaas|http://keycloak:8080/auth/realms/${KEYCLOAK_REALM}|g" ./workspaces/test/dtaas/config/.env
+          sed -i "s|SERVER_DNS=foo.com|SERVER_DNS=${SERVER_DNS}|g" ./workspaces/test/dtaas/config/.env
           cp ./workspaces/test/dtaas/config/conf.example ./workspaces/test/dtaas/config/conf
           cp ./workspaces/test/dtaas/config/client.js.example ./workspaces/test/dtaas/config/client.js
 
@@ -214,33 +244,47 @@ jobs:
       - name: Start Traefik and workspace services (TLS)
         run: |
           docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env up -d
-          echo "⏳ Waiting for services to be ready..."
-          sleep 180
+          echo "⏳ Waiting for Keycloak to be ready..."
+          sleep 30
+
+      - name: Setup Keycloak realm and client (TLS)
+        run: |
+          chmod +x ./scripts/setup_keycloak.sh
+          # Load environment variables from .env file
+          set -a
+          source workspaces/test/dtaas/config/.env
+          set +a
+          # Run setup script with values from .env
+          KEYCLOAK_URL=http://localhost:8080/auth \
+          REDIRECT_URI="https://localhost/_oauth/*" \
+          WEB_ORIGINS="https://localhost" \
+          ./scripts/setup_keycloak.sh
+          echo "⏳ Waiting for all services to stabilize..."
+          sleep 30
+          # Restart traefik-forward-auth to pick up the new realm
+          docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env restart traefik-forward-auth
+          sleep 15
 
       - name: Check service health (TLS)
         run: |
           echo "📊 Checking service status..."
           docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env ps
           echo "---"
-          # Check if critical services are running (exclude traefik-forward-auth as it requires manual Keycloak realm setup)
+          # Check if all services are running
           SERVICES=$(docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env ps --format json)
           if echo "$SERVICES" | head -1 | grep -q '^\['; then
             # JSON array format
-            FAILED=$(echo "$SERVICES" | jq -r '.[] | select(.State != "running") | select(.Name | contains("traefik-forward-auth") | not) | .Name')
+            FAILED=$(echo "$SERVICES" | jq -r '.[] | select(.State != "running") | .Name')
           else
             # Newline-delimited JSON format
-            FAILED=$(echo "$SERVICES" | jq -r 'select(.State != "running") | select(.Name | contains("traefik-forward-auth") | not) | .Name')
+            FAILED=$(echo "$SERVICES" | jq -r 'select(.State != "running") | .Name')
           fi
           if [ -n "$FAILED" ]; then
             echo "❌ Some services are not running:"
             echo "$FAILED"
             exit 1
           fi
-          # Log traefik-forward-auth status separately (expected to fail without Keycloak realm)
-          echo ""
-          echo "ℹ️  Note: traefik-forward-auth requires manual Keycloak realm setup (see KEYCLOAK_SETUP.md)"
-          docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env ps traefik-forward-auth || true
-          echo "✅ Critical services are running"
+          echo "✅ All services are running"
 
       - name: Test HTTPS connectivity
         run: |
