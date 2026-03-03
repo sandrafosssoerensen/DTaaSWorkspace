@@ -65,7 +65,7 @@ Build and start all services:
 
 ```bash
 docker compose -f compose.traefik.secure.tls.yml build
-docker compose -f compose.traefik.secure.tls.yml --env-file dtaas/.env up -d
+docker compose -f compose.traefik.secure.tls.yml --env-file config/.env up -d
 ```
 
 ### 3. Configure Keycloak
