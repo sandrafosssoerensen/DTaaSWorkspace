@@ -90,8 +90,7 @@ services:
       - frontend
       - users
     depends_on:
-      keycloak:
-        condition: service_healthy
+      - keycloak:
 
   client:
     image: intocps/dtaas-web:latest

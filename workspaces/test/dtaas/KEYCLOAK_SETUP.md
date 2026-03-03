@@ -254,7 +254,7 @@ If you're migrating from the previous GitLab OAuth setup:
 
 1. Backup your current `.env` file
 2. Update `.env` with Keycloak configuration
-3. Update user whitelist in `dtaas/conf` to use Keycloak usernames/emails
+3. Update user whitelist in `config/conf` to use Keycloak usernames/emails
 4. Test with a single user before migrating all users
 
 ## References

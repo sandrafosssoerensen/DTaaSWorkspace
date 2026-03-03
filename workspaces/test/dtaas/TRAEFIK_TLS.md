@@ -292,13 +292,13 @@ environment:
 
 ### HTTP-Only with OAuth2 (Development)
 
-For development environments where TLS is not required, see [`TRAEFIK_SECURE.md`](./TRAEFIK_SECURE.md).
+For development environments where TLS is not required, see [`TRAEFIK_SECURE.md`](TRAEFIK_SECURE.md).
 
 This provides OAuth2 authentication without TLS encryption.
 
 ### Basic Traefik (No Auth, No TLS)
 
-For local development without authentication or encryption, see [`TRAEFIK.md`](./TRAEFIK.md).
+For local development without authentication or encryption, see [`TRAEFIK.md`](TRAEFIK.md).
 
 ### Standalone Workspace (Single User)
 

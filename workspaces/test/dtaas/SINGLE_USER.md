@@ -153,4 +153,4 @@ docker compose -f workspaces/test/dtaas/compose.yml --env-file workspaces/test/d
 ⚠️ **Important**: This configuration is designed for development and testing,
 and should not be reconfigured to be exposed to the internet.
 
-For setting up a composition that can be exposed to the internet, see [TRAEFIK_TLS.md](./TRAEFIK_TLS.md).
+For setting up a composition that can be exposed to the internet, see [TRAEFIK_TLS.md](TRAEFIK_TLS.md).

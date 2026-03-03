@@ -273,7 +273,7 @@ and uses some insecure settings:
 - No TLS/HTTPS encryption
 - Debug logging enabled
 
-For setting up a composition that includes TLS/HTTPS, see [TRAEFIK_TLS.md](./TRAEFIK_TLS.md).
+For setting up a composition that includes TLS/HTTPS, see [TRAEFIK_TLS.md](TRAEFIK_TLS.md).
 
 ## 🔍 Troubleshooting
 

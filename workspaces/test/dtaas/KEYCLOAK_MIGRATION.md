@@ -64,7 +64,7 @@ environment:
 - Added `keycloak-data` volume for persistence
 - Added `depends_on` to ensure Keycloak starts before auth
 
-### 2. `dtaas/.env.example`
+### 2. `config/.env.example`
 
 - Added Keycloak-specific environment variables
 - Maintained backward compatibility with GitLab OAuth
