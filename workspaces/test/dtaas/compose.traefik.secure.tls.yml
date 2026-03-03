@@ -42,8 +42,6 @@ services:
       - KC_PROXY_HEADERS=xforwarded
       - KC_HTTP_ENABLED=true
       - KC_HTTP_RELATIVE_PATH=/auth
-    ports:
-      - "8080:8080"
     volumes:
       - keycloak-data:/opt/keycloak/data
     healthcheck:
