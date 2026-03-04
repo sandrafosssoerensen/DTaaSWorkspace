@@ -99,8 +99,7 @@ After publishing, the workflow automatically:
 This ensures that published images are functional and match local builds.
 
 **Note**: The test suite currently runs on linux/amd64 runners. Both
-architectures are built, tested and published. The arm64 variant is built using QEMU emulation during the build
-process.
+architectures are built, tested and published. The arm64 variant uses QEMU emulation during testing.
 
 ## Manual Publishing
 

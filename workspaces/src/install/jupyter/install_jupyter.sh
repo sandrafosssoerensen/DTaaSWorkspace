@@ -3,7 +3,7 @@ set -xe
 
 # Installs Jupyter and Python3
 
-DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y \
+DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends\
     python3 \
     python3-pip
 

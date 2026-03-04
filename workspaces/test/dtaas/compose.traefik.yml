@@ -50,7 +50,7 @@ services:
     volumes:
       - ./files/user2:/workspace
       - ./files/common:/workspace/common
-    shm_size: "512m"
+    shm_size: 512m
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.u2.entryPoints=web"

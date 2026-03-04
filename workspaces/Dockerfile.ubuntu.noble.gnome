@@ -1,3 +1,5 @@
+ARG INSTALLATION="full"
+
 FROM kasmweb/core-ubuntu-noble:1.18.0 AS configure
 
 # Docker build arguments for multi-architecture support
@@ -26,8 +28,14 @@ ENV ADMIN_SERVER_PORT=8091 \
 
 WORKDIR $HOME
 
+# Configure locale generation to only build en_US.UTF-8 to reduce build time
+RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
+    rm -rf /var/lib/locales/supported.d/*
+
 COPY ./src/install/ ${INST_DIR}
 COPY ./src/admin/ ${ADMIN_DIR}
+
+FROM configure AS install-full
 
 RUN bash ${INST_DIR}/firefox/install_firefox.sh && \
     bash ${INST_DIR}/nginx/install_nginx.sh && \
@@ -35,6 +43,18 @@ RUN bash ${INST_DIR}/firefox/install_firefox.sh && \
     bash ${INST_DIR}/jupyter/install_jupyter.sh && \
     bash ${INST_DIR}/admin/install_admin.sh && \
     bash ${INST_DIR}/dtaas_cleanup.sh
+
+FROM configure AS install-minimal
+
+# Tells the custom_startup script to not try to start the vscode server
+ENV VSCODE_DISABLED=1 \
+    JUPYTER_DISABLED=1
+
+RUN bash ${INST_DIR}/nginx/install_nginx.sh && \
+    bash ${INST_DIR}/admin/install_admin.sh && \
+    bash ${INST_DIR}/dtaas_cleanup.sh
+
+FROM install-${INSTALLATION} AS setup
 
 COPY ./src/startup/ ${STARTUPDIR}
 
@@ -59,7 +79,7 @@ RUN python3 -c "import os, shlex; print('\n'.join(f'export {k}={shlex.quote(v)}'
     chmod 755 /tmp/.docker_set_envs
 
 FROM scratch AS deploy
-COPY --from=configure / /
+COPY --from=setup / /
 
 LABEL org.opencontainers.image.title="workspace" \
       org.opencontainers.image.description="A containerized virtual desktop environment with KasmVNC, Firefox, Jupyter, and VS Code Server for DTaaS" \

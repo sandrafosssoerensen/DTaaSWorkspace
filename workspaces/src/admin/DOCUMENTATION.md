@@ -121,6 +121,7 @@ curl http://localhost:8091/{path-prefix}
 ### Components
 
 - **FastAPI Application** (`src/admin/main.py`): Core service implementation
+  containing all routes (`/`, `/services`, `/health`) and CLI entry point
 - **Services Template** (`src/admin/services_template.json`): JSON template
   defining available services
 - **nginx Configuration** (`startup/nginx.conf`): Reverse proxy routing

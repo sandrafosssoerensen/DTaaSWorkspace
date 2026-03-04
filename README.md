@@ -94,7 +94,7 @@ the `.env` file.
 - ***Open workspace*** -
   <http://localhost:8080/user1/tools/vnc?path=user1%2Ftools%2Fvnc%2Fwebsockify>
 - ***Open VSCode*** - <http://localhost:8080/user1/tools/vscode>
-- ***Open Jupyter Notebook*** - <http://localhost:8080>
+- ***Open Jupyter Notebook*** - <http://localhost:8080/user1>
 - ***Open Jupyter Lab*** - <http://localhost:8080/user1/lab>
 
 ### Service Discovery
@@ -202,6 +202,19 @@ For information about publishing Docker images to registries,
 see [PUBLISHING.md](PUBLISHING.md).
 
 ## Development
+
+### Alternative Development Image
+
+If the full featureset of the workspace image is not necessary during development, a slimmer, quicker to build image can be generated instead.
+
+This is done by adding the setting the build argument `INSTALLATION` to `minimal` when building the image. For example:
+
+```
+docker build -t workspace:latest \
+  -f workspaces/Dockerfile.ubuntu.noble.gnome \
+  --build-arg INSTALLATION=minimal \
+  ./workspaces
+```
 
 ### Code Quality
 

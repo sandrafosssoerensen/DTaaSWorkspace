@@ -61,9 +61,13 @@ if [[ ! -h "${HOME}"/Desktop/workspace ]]; then
 fi
 
 start_nginx
-start_jupyter
-start_vscode_server "${PERSISTENT_DIR}"
+if [[ ! ${JUPYTER_DISABLED:-0} == 1 ]]; then
+    start_jupyter
+fi
 start_admin_server
+if [[ ! ${VSCODE_DISABLED:-0} == 1 ]]; then
+    start_vscode_server "${PERSISTENT_DIR}"
+fi
 
 # Monitor and resurrect DTaaS services.
 sleep 3
@@ -98,7 +102,7 @@ do
                 start_admin_server
                 ;;
             *)
-                echo "[WARNING] An unknown service '${process}' unexpectededly monitored by the custom_startup script was reported to have exitted. This is most irregular - check if something is adding processes to the custom_startup scripts list of monitored subprocesses."
+                echo "[WARNING] An unknown service '${process}' unexpectedly monitored by the custom_startup script was reported to have exited. This is most irregular - check if something is adding processes to the custom_startup script's list of monitored subprocesses."
                 ;;
         esac
     done

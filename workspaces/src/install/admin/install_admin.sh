@@ -6,6 +6,7 @@ echo "Installing Admin Service"
 # Install Poetry and pipx
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     python3-poetry \
+    python-is-python3 \
     pipx
 
 poetry --version
