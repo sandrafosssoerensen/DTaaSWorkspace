@@ -44,7 +44,7 @@ services:
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
       - KC_HOSTNAME_STRICT=false
       - KC_PROXY_HEADERS=xforwarded
-      - KC_HTTP_ENABLED=true
+      - KC_HTTP_ENABLED=true  # HTTP connection from Traefik (HTTPS is terminated at Traefik)
     volumes:
       - keycloak-data:/opt/keycloak/data
     healthcheck:
