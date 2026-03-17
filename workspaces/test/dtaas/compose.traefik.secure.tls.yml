@@ -1,8 +1,3 @@
-# Production-ready Traefik configuration with TLS/HTTPS for secure deployments of the DTAAS workspace.
-# This configuration is intended for production use with TLS/HTTPS. For development/testing, use compose.traefik.secure.yml instead.
-
-name: dtaas
-
 services:
   traefik:
     image: traefik:v3.6.4
@@ -42,12 +37,11 @@ services:
     environment:
       - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
-      - KC_HOSTNAME=${SERVER_DNS:-localhost}
+      - KC_HOSTNAME=https://${SERVER_DNS:-localhost}/auth
       - KC_HOSTNAME_STRICT=false
       - KC_PROXY_HEADERS=xforwarded
-      - KC_HTTP_ENABLED=true  # HTTP connection from Traefik (HTTPS is terminated at Traefik)
-      - KC_HOSTNAME_URL=https://${SERVER_DNS:-localhost}/auth
-      - KC_HOSTNAME_ADMIN_URL=https://${SERVER_DNS:-localhost}/auth
+      - KC_HTTP_ENABLED=true
+      - KC_HTTP_RELATIVE_PATH=/auth
     volumes:
       - keycloak-data:/opt/keycloak/data
     healthcheck:
@@ -67,7 +61,7 @@ services:
       - users
 
   client:
-    image: intocps/dtaas-web:new-workspace
+    image: intocps/dtaas-web:latest
     restart: unless-stopped
     volumes:
       - "./config/client.js:/dtaas/client/build/env.js"
@@ -122,18 +116,18 @@ services:
 
   traefik-forward-auth:
     image: thomseddon/traefik-forward-auth:latest
-    #image: traefik-forward-auth-local:latest
     restart: unless-stopped
-    extra_hosts:
-      - "localhost:host-gateway"  # Resolve localhost to Docker host so OIDC discovery reaches Traefik on port 443
     volumes:
       - "./config/conf:/conf"
     environment:
       - LOG_LEVEL=trace
-      - DEFAULT_PROVIDER=oidc
-      - PROVIDERS_OIDC_ISSUER_URL=${KEYCLOAK_ISSUER_URL:-http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}}
-      - PROVIDERS_OIDC_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
-      - PROVIDERS_OIDC_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
+      - DEFAULT_PROVIDER=generic-oauth
+      - PROVIDERS_GENERIC_OAUTH_AUTH_URL=https://${SERVER_DNS:-localhost}/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/auth
+      - PROVIDERS_GENERIC_OAUTH_TOKEN_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/token
+      - PROVIDERS_GENERIC_OAUTH_USER_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/userinfo
+      - PROVIDERS_GENERIC_OAUTH_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
+      - PROVIDERS_GENERIC_OAUTH_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
+      - PROVIDERS_GENERIC_OAUTH_SCOPE=openid,profile,email
       - SECRET=${OAUTH_SECRET}
       - INSECURE_COOKIE=false
       - CONFIG=/conf

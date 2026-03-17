@@ -145,28 +145,31 @@ Then, edit the new DTaaS Web Client config file, updating the following values:
 
 ### 🔑🖥️ Client OAuth2 Setup
 
-In addition, the DTaaS web client uses OAuth2 authorization as well.
-It needs a client application.
-The following steps explain creation of Client OAuth2 application
-on a Gitlab installation.
+The DTaaS web client also uses OIDC directly and must point to the Keycloak
+issuer, not to a GitLab-style `.well-known` URL. Use the Keycloak realm issuer:
 
-1. Go to your GitLab instance → Edit Profile Settings → Applications
-2. Create a new OAuth App with:
-   - **Application name**: DTaaS Workspace
-   - **Homepage URL**: `https://yourdomain.com`
-   - **Authorization callback URL**: `https://yourdomain.com/Library`
-   - **Scopes**: `openid`, `profile`, `read_user`, `read_repository`, `api`
-3. Save the **Client ID**
+- `https://<DOMAIN_NAME>/auth/realms/dtaas` for TLS deployments
+- `http://<DOMAIN_NAME>/auth/realms/dtaas` for HTTP-only development
 
-Create and update the DTaaS web client configuration.
+Configure a Keycloak OIDC client for the DTaaS web frontend with:
 
-```bash
-cp dtaas/client.js.example dtaas/client.js
-```
+1. **Client ID**: `dtaas-workspace`
+2. **Redirect URI**: `<PROTOCOL>://<DOMAIN_NAME>/Library`
+3. **Post logout redirect URI**: `<PROTOCOL>://<DOMAIN_NAME>/`
+4. **Standard flow** enabled
+5. **PKCE** enabled if your DTaaS frontend requires public-client login
 
-Update the `REACT_APP_CLIENT_ID` with the **Client ID** generated above
-and `REACT_APP_AUTH_AUTHORITY` with URL of your GitLab instance, for example
-`https://gitlab.com`.
+Update [`config/client.js`](./config/client.js) so these values match your realm:
+
+- `REACT_APP_CLIENT_ID`: the Keycloak client ID
+- `REACT_APP_AUTH_AUTHORITY`: the realm issuer URL
+- `REACT_APP_REDIRECT_URI`: `<PROTOCOL>://<DOMAIN_NAME>/Library`
+- `REACT_APP_LOGOUT_REDIRECT_URI`: `<PROTOCOL>://<DOMAIN_NAME>/`
+- `REACT_APP_GITLAB_SCOPES`: start with `openid profile email`
+
+If DTaaS still explicitly requests GitLab-style scopes such as `read_user`,
+`read_repository`, or `api`, only then add matching optional client scopes in
+Keycloak so the request is accepted.
 
 ## 🔑 OAuth2 Configuration
 

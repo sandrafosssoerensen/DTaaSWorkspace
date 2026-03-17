@@ -40,6 +40,7 @@ services:
     environment:
       - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      - KC_HOSTNAME=http://${SERVER_DNS:-localhost}/auth
       - KC_HTTP_ENABLED=true  # HTTP connection from Traefik (HTTPS is terminated at Traefik)
       - KC_PROXY_HEADERS=xforwarded  # Enable proxy headers for Traefik
     volumes:
@@ -62,16 +63,17 @@ services:
   traefik-forward-auth:
     image: thomseddon/traefik-forward-auth:2.2.0
     restart: unless-stopped
-    extra_hosts:
-      - "localhost:host-gateway"  # Resolve localhost to Docker host so OIDC discovery reaches Keycloak on port 8080
     volumes:
       - ./config/conf:/conf
     environment:
       - LOG_LEVEL=trace
-      - DEFAULT_PROVIDER=oidc
-      - PROVIDERS_OIDC_ISSUER_URL=${KEYCLOAK_ISSUER_URL:-http://${SERVER_DNS:-localhost}:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}}
-      - PROVIDERS_OIDC_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
-      - PROVIDERS_OIDC_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
+      - DEFAULT_PROVIDER=generic-oauth
+      - PROVIDERS_GENERIC_OAUTH_AUTH_URL=http://${SERVER_DNS:-localhost}/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/auth
+      - PROVIDERS_GENERIC_OAUTH_TOKEN_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/token
+      - PROVIDERS_GENERIC_OAUTH_USER_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/userinfo
+      - PROVIDERS_GENERIC_OAUTH_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
+      - PROVIDERS_GENERIC_OAUTH_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
+      - PROVIDERS_GENERIC_OAUTH_SCOPE=openid,profile,email
       - SECRET=${OAUTH_SECRET}
       - INSECURE_COOKIE=true  # DEV ONLY - set to false with HTTPS in production
       - CONFIG=/conf

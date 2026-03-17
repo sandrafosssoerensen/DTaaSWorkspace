@@ -105,6 +105,7 @@ docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-fil
    - **Valid redirect URIs**:
     - `https://foo.com/_oauth/*`
     - `https://foo.com/*`
+    - `https://foo.com/Library`
    - **Valid post logout redirect URIs**: `https://foo.com/*`
    - **Web origins**: `https://foo.com`
    - Click **Save**
@@ -112,6 +113,53 @@ docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-fil
    - Go to the **Credentials** tab
    - Copy the **Client secret** value
    - Update `KEYCLOAK_CLIENT_SECRET` in your `.env` file
+
+#### Configure Required Scopes
+
+Start with the standard OIDC scopes only:
+
+- `openid`
+- `profile`
+- `email`
+
+These are the scopes requested by `traefik-forward-auth` in this repository.
+If the DTaaS frontend still requests legacy GitLab scopes such as `read_user`,
+`read_repository`, or `api`, add matching optional client scopes in Keycloak
+only if the frontend actually fails without them.
+
+#### Configure Required Claims
+
+For DTaaS compatibility, verify that the ID token or userinfo response exposes
+at least these claims:
+
+- `sub`
+- `name`
+- `preferred_username`
+- `profile`
+- `groups`
+
+`sub`, `name`, and `preferred_username` are usually available already. The
+`profile` claim normally needs a custom mapper if DTaaS expects a GitLab-style
+profile URL.
+
+#### Add the `profile` Claim Mapper
+
+If DTaaS expects:
+
+```text
+profile = https://foo.com/gitlab/{username}
+```
+
+add a protocol mapper that emits `profile` in the ID token and userinfo
+response based on `preferred_username`. Depending on your Keycloak version,
+this can be done with a script mapper or another mapper that builds the value
+from the username.
+
+#### Add the `groups` Claim Mapper
+
+Add a Group Membership mapper so the userinfo response includes a `groups`
+claim. This is useful both for DTaaS compatibility and later authorization
+rules.
 
 #### Create Users
 
@@ -244,6 +292,23 @@ To access custom user attributes:
 1. In Keycloak, create client scopes with mappers
 2. Assign scopes to the client
 3. Configure traefik-forward-auth to request additional scopes
+
+## Manual Compatibility Tests
+
+Before treating the integration as complete, verify these four checks:
+
+1. **Discovery**
+   - Open `https://<SERVER_DNS>/auth/realms/<realm>/.well-known/openid-configuration`
+   - Confirm the JSON contains `authorization_endpoint`, `token_endpoint`,
+     `userinfo_endpoint`, and `jwks_uri`
+2. **Login and code flow**
+   - Trigger login from DTaaS and verify it redirects to Keycloak and back
+3. **Token exchange**
+   - Confirm DTaaS receives an access token, refresh token, and ID token
+4. **Userinfo**
+   - Confirm the response includes `preferred_username`, `profile`, and `groups`
+   - If you preserve GitLab compatibility, confirm `profile` exactly matches
+     `https://foo.com/gitlab/{username}`
 
 ### Role-Based Access Control (RBAC)
 
