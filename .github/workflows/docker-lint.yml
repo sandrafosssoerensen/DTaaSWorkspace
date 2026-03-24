@@ -1,0 +1,43 @@
+name: Dockerfile Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint Dockerfile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Run hadolint
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: workspaces/Dockerfile.ubuntu.noble.gnome
+          failure-threshold: error
+
+      - name: Lint CI certs Dockerfile
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: workspaces/test/dtaas/ci/certs/Dockerfile
+          failure-threshold: error
+
+      - name: Lint Docker Compose files
+        run: |
+          # Find and lint all compose files
+          for file in $(find . -name "compose*.yaml" -o -name "compose*.yml"); do
+            echo "Linting $file"
+            docker compose -f "$file" \
+              --env-file workspaces/test/dtaas/config/.env.example \
+              config --quiet
+          done

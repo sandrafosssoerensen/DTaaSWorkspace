@@ -1,0 +1,10 @@
+# traefik-forward-auth access rules for CI testing.
+# Each rule maps a URL prefix to an allowed email address (Dex test user).
+
+rule.user1_access.action=auth
+rule.user1_access.rule=PathPrefix(`/user1`)
+rule.user1_access.whitelist = user1@localhost
+
+rule.user2_access.action=auth
+rule.user2_access.rule=PathPrefix(`/user2`)
+rule.user2_access.whitelist = user2@localhost

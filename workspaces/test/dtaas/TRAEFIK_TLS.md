@@ -1,18 +1,18 @@
-# Workspace with Traefik, OAuth2, and TLS
+# Workspace with Traefik, Keycloak, and TLS
 
 This guide explains how to deploy the workspace container with Traefik reverse
-proxy, OAuth2 authentication, and TLS/HTTPS support for secure multi-user
-deployments.
+proxy, OIDC/OAuth2 authentication using Keycloak, and TLS/HTTPS support for
+secure multi-user deployments.
 
 ## ❓ Prerequisites
 
-✅ Docker Engine v27 or later  
-✅ Docker Compose v2.x  
-✅ Sufficient system resources (at least 1GB RAM per workspace instance)  
-✅ Valid TLS certificates (production) or ability to generate self-signed
-certs (testing)  
-✅ OAuth2 provider (GitLab, GitHub, Google, etc.)  
-✅ Domain name pointing to your server (for production)
+✅ Docker Engine v27 or later
+✅ Docker Compose v2.x
+✅ Port 80 and 443 available on your host machine
+✅ Sufficient system resources (at least 1GB RAM per workspace instance)
+✅ Valid TLS certificates (production) or self-signed certs (testing)
+✅ Domain name pointing to your server (production) or localhost (testing)
+✅ GitLab OAuth2 provider for Client OAuth2 application (external application)
 
 ## 🗒️ Overview
 
@@ -20,129 +20,30 @@ The `compose.traefik.secure.tls.yml` file provides a production-ready setup with
 
 - **Traefik** reverse proxy with TLS termination (ports 80, 443)
 - **Automatic HTTP to HTTPS redirect**
-- **OAuth2 authentication** via traefik-forward-auth
+- **OIDC authentication** via embedded Keycloak and traefik-forward-auth
 - **Multiple workspace instances** (user1, user2) behind authentication
 - **Secure communication** with TLS certificates
+- **user1** workspace using the workspace image
+- **user2** workspace using the mltooling/ml-workspace-minimal image
 - **Two Docker networks**: `dtaas-frontend` and `dtaas-users`
 
-## 🔐 TLS Certificate Setup
+## ⚙️ Initial Configuration
 
-### Option 1: Production Certificates (Recommended)
+Please follow the steps in [`CONFIGURATION.md`](CONFIGURATION.md) for the `compose.traefik.secure.tls.yml` composition before building the workspace and running the setup.
 
-For production, obtain certificates from a trusted Certificate Authority:
+## Create Workspace Files
 
-#### Using Let's Encrypt with Certbot
-
-```bash
-# Install certbot
-sudo apt-get update
-sudo apt-get install certbot
-
-# Generate certificates
-sudo certbot certonly --standalone -d yourdomain.com
-
-# Copy certificates to the project
-sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem ./certs/
-sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ./certs/
-sudo chown $USER:$USER ./certs/*.pem
-chmod 644 ./certs/fullchain.pem
-chmod 600 ./certs/privkey.pem
-```
-
-### Option 2: Self-Signed Certificates (Testing Only, Local Only)
-
-For local development and testing, generate self-signed certificates.
-See `certs/README.md`, section "Certificate Generation" subsection
-"For Testing/Development" for the steps.
-
-⚠️ **Note**: Self-signed certificates will show security warnings in browsers
-and should only be used for testing.
-
-## 🔑 OAuth2 Configuration
-
-This setup uses traefik-forward-auth with OAuth2 for authentication. You'll
-need to configure an OAuth2 application with your provider.
-
-### GitLab OAuth2 Setup
-
-1. Go to your GitLab instance → Settings → Applications
-2. Create a new application with:
-   - **Name**: DTaaS Workspace
-   - **Redirect URI**: `https://yourdomain.com/_oauth`
-   - **Scopes**: `read_user`, `openid`, `profile`, `email`
-3. Save the **Application ID** and **Secret**
-
-### GitHub OAuth2 Setup
-
-1. Go to GitHub → Settings → Developer settings → OAuth Apps
-2. Create a new OAuth App with:
-   - **Application name**: DTaaS Workspace
-   - **Homepage URL**: `https://yourdomain.com`
-   - **Authorization callback URL**: `https://yourdomain.com/_oauth`
-3. Save the **Client ID** and **Client Secret**
-
-### Environment Variables
-
-Copy the the environment example file into the root of this directory:
+All the deployment options require user directories for
+storing workspace files. These need to
+be created for `USERNAME1` and `USERNAME2` set in
+`workspaces/test/dtaas/config/.env` file.
 
 ```bash
-sp ./dtaas/.env.example .env
-```
-
-Replace the placeholders with the values you got from your
-OAuth2 provider, a 32 character secret and your domain name.
-
-Create a `.env` file in the project root with your OAuth2 credentials:
-
-```bash
-# Your GitLab instance URL (without trailing slash)
-# Example: https://gitlab.com or https://gitlab.example.com
-OAUTH_URL=https://gitlab.com
-
-# OAuth Application Client ID
-# Obtained when creating the OAuth application in GitLab
-OAUTH_CLIENT_ID=your_client_id_here
-
-# OAuth Application Client Secret
-# Obtained when creating the OAuth application in GitLab
-OAUTH_CLIENT_SECRET=your_client_secret_here
-
-# Secret key for encrypting OAuth session data
-# Generate a random string (at least 16 characters)
-# Example: openssl rand -base64 32
-OAUTH_SECRET=your_random_secret_key_here
-
-# Server Configuration
-SERVER_DNS=yourdomain.com
-```
-
-The 32 character long secret for `OAUTH_SECRET` can be generated with:
-
-```bash
-openssl rand -hex 16
-```
-
-## 💻 (Local Domain Redirection)
-
-If you are testing and/or developing locally, ensure that
-`yourdomain.com` points to your local machine by adding the
-following line to `/etc/hosts`:
-```bash
-127.0.0.1 yourdomain.com
-```
-
-## 💪 Build Workspace Image
-
-Before starting the services, build the workspace-nouveau image:
-
-```bash
-docker compose -f compose.traefik.secure.tls.yml build user1
-```
-
-Or use the standard build command:
-
-```bash
-docker build -t workspace-nouveau:latest -f Dockerfile .
+# create required files
+cp -R workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/<USERNAME1>
+cp -R workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/<USERNAME2>
+# set file permissions for use inside the container
+sudo chown -R 1000:100 workspaces/test/dtaas/files
 ```
 
 ## :rocket: Start Services
@@ -150,7 +51,7 @@ docker build -t workspace-nouveau:latest -f Dockerfile .
 To start all services with TLS:
 
 ```bash
-docker compose -f compose.traefik.secure.tls.yml up -d
+docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml  --env-file workspaces/test/dtaas/config/.env up -d
 ```
 
 This will:
@@ -165,12 +66,55 @@ This will:
 
 Once all services are running, access the workspaces through Traefik with HTTPS:
 
-### User1 Workspace (workspace-nouveau)
+### User1 Workspace (workspace)
 
 - **VNC Desktop**: `https://yourdomain.com/user1/tools/vnc?path=user1%2Ftools%2Fvnc%2Fwebsockify`
 - **VS Code**: `https://yourdomain.com/user1/tools/vscode`
 - **Jupyter Notebook**: `https://yourdomain.com/user1`
 - **Jupyter Lab**: `https://yourdomain.com/user1/lab`
+
+#### Service Discovery
+
+The workspace provides a `/services` endpoint that returns a JSON list of
+available services. This enables dynamic service discovery for frontend
+applications.
+
+**Example**: Get service list for user1
+
+```bash
+curl https://yourdomain.com/user1/services
+```
+
+**Response**:
+
+```json
+{
+  "desktop": {
+    "name": "Desktop",
+    "description": "Virtual Desktop Environment",
+    "endpoint": "tools/vnc?path=user1%2Ftools%2Fvnc%2Fwebsockify"
+  },
+  "vscode": {
+    "name": "VS Code",
+    "description": "VS Code IDE",
+    "endpoint": "tools/vscode"
+  },
+  "notebook": {
+    "name": "Jupyter Notebook",
+    "description": "Jupyter Notebook",
+    "endpoint": ""
+  },
+  "lab": {
+    "name": "Jupyter Lab",
+    "description": "Jupyter Lab IDE",
+    "endpoint": "lab"
+  }
+}
+```
+
+The endpoint values are dynamically populated with the user's username from the
+`MAIN_USER` environment variable. This variable corresponds to `USERNAME1` of
+`.env` file.
 
 ### User2 Workspace (ml-workspace-minimal)
 
@@ -198,23 +142,14 @@ Once all services are running, access the workspaces through Traefik with HTTPS:
 To stop all services:
 
 ```bash
-docker compose -f compose.traefik.secure.tls.yml down
+docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml  --env-file workspaces/test/dtaas/config/.env down
 ```
 
 To stop and remove volumes:
 
 ```bash
-docker compose -f compose.traefik.secure.tls.yml down -v
+docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml  --env-file workspaces/test/dtaas/config/.env down -v
 ```
-
-## ⚙️ Network Configuration
-
-The setup uses two Docker networks:
-
-- **dtaas-frontend**: Used by Traefik and traefik-forward-auth for external communication
-- **dtaas-users**: Shared network for workspace instances
-
-This separation provides better network isolation and security.
 
 ## 🔧 Customization
 
@@ -223,29 +158,53 @@ This separation provides better network isolation and security.
 To add additional workspace instances, add a new service in `compose.traefik.secure.tls.yml`:
 
 ```yaml
-user3:
-  image: workspace-nouveau:latest
-  restart: unless-stopped
-  environment:
-    - MAIN_USER=user3
-  volumes:
-    - ./persistent_dir/user3:/workspace
-    - ./persistent_dir/common:/workspace/common
-  shm_size: 512m
-  labels:
-    - "traefik.enable=true"
-    - "traefik.http.routers.u3.entryPoints=websecure"
-    - "traefik.http.routers.u3.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/user3`)"
-    - "traefik.http.routers.u3.tls=true"
-    - "traefik.http.routers.u3.middlewares=traefik-forward-auth"
-  networks:
-    - users
+  user3:
+    image: workspace:latest
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: Dockerfile.ubuntu.noble.gnome
+    environment:
+      - MAIN_USER=${USERNAME3:-user3}
+    volumes:
+      - "./files/common:/workspace/common"
+      - "./files/user3:/workspace"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.u3.rule=Host(`${SERVER_DNS}`) && PathPrefix(`/${USERNAME3:-user3}`)"
+      - "traefik.http.routers.u3.tls=true"
+      - "traefik.http.routers.u3.middlewares=traefik-forward-auth"
+    networks:
+      - users
 ```
+
+Add the desired `USERNAME3` variable in [`.env`](./config/.env):
+
+```bash
+# Username Configuration
+# These usernames will be used as path prefixes for user workspaces
+# Example: http://localhost/user1, http://localhost/user2
+USERNAME1=user1
+USERNAME2=user2
+USERNAME3=user3 # <--- replace "user3" with your desired username
+```
+
+Add Forward Auth config for user3 in [`conf`](./config/conf):
+
+```txt
+
+rule.user3_access.action=auth
+rule.user3_access.rule=PathPrefix(`/user3`)
+rule.user3_access.whitelist = user3@localhost 
+```
+
+Ensure that the username and email correspond to the workspaces GitLab user.
 
 Don't forget to create the user's directory:
 
 ```bash
-mkdir -p persistent_dir/user3
+cp -r ./workspaces/test/dtaas/files/user1 ./workspaces/test/dtaas/files/user3
+sudo chown -R 1000:100 workspaces/test/dtaas/files
 ```
 
 ### Using Different OAuth2 Providers
@@ -273,40 +232,6 @@ environment:
   - PROVIDERS_OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
   - SECRET=${OAUTH_SECRET}
 ```
-
-## :shield: Security Best Practices
-
-### TLS Configuration
-
-✅ Use certificates from trusted Certificate Authorities for production  
-✅ Keep private keys secure with proper file permissions (600)  
-✅ Rotate certificates before expiration  
-✅ Use strong key sizes (RSA 2048+ bits or ECC)  
-✅ Enable HSTS (HTTP Strict Transport Security) for production
-
-### OAuth2 Configuration
-
-✅ Use strong, random secrets for `OAUTH_SECRET`  
-✅ Rotate OAuth2 secrets periodically  
-✅ Limit OAuth2 application scopes to minimum required  
-✅ Use environment variables for sensitive configuration  
-✅ Never commit `.env` files to version control
-
-### Network Security
-
-✅ Use Docker networks to isolate services  
-✅ Don't expose internal services directly  
-✅ Configure firewall rules to limit access  
-✅ Enable Docker socket protection  
-✅ Regularly update Docker images
-
-### Container Security
-
-✅ Run containers as non-root users when possible  
-✅ Set resource limits (CPU, memory) for containers  
-✅ Use read-only volumes where appropriate  
-✅ Scan images for vulnerabilities regularly  
-✅ Keep base images and dependencies updated
 
 ## 🐛 Troubleshooting
 
@@ -368,37 +293,18 @@ environment:
 
 ### HTTP-Only with OAuth2 (Development)
 
-For development environments where TLS is not required, use:
-
-```bash
-docker compose -f compose.traefik.secure.yml up -d
-```
+For development environments where TLS is not required, see [`TRAEFIK_SECURE.md`](TRAEFIK_SECURE.md).
 
 This provides OAuth2 authentication without TLS encryption.
 
 ### Basic Traefik (No Auth, No TLS)
 
-For local development without authentication or encryption, use:
-
-```bash
-docker compose -f compose.traefik.yml up -d
-```
+For local development without authentication or encryption, see [`TRAEFIK.md`](TRAEFIK.md).
 
 ### Standalone Workspace (Single User)
 
 For single-user local development, use:
 
 ```bash
-docker compose -f compose.yml up -d
+docker compose -f workspaces/test/dtaas/compose.yml up -d
 ```
-
-## 📊 Deployment Comparison
-
-| Feature | compose.yml | compose.traefik.yml | compose.traefik.secure.yml | compose.traefik.secure.tls.yml |
-| ------- | ----------- | ------------------- | -------------------------- | ------------------------------ |
-| Reverse Proxy | ❌ | ✅ | ✅ | ✅ |
-| Multi-user | ❌ | ✅ | ✅ | ✅ |
-| OAuth2 Auth | ❌ | ❌ | ✅ | ✅ |
-| TLS/HTTPS | ❌ | ❌ | ❌ | ✅ |
-| Production Ready | ❌ | ❌ | ❌ | ✅ |
-| Use Case | Local dev | Multi-user dev | Secure dev/test | Production |

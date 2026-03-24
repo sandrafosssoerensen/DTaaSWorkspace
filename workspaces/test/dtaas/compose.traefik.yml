@@ -1,4 +1,9 @@
-name: workspace-traefik
+# ⚠️ DEVELOPMENT ONLY - INSECURE CONFIGURATION ⚠️
+# This configuration uses Traefik for multi-user scenario.
+# This configuration uses Traefik in HTTP mode for development/testing.
+# For production deployments with TLS/HTTPS, use compose.traefik.secure.tls.yml instead.
+
+name: dtaas
 
 services:
   traefik:
@@ -31,7 +36,7 @@ services:
     environment:
       - MAIN_USER=${USERNAME1:-user1}
     volumes:
-      - ./files/user1:/workspace
+      - ./files/${USERNAME1:-user1}:/workspace
       - ./files/common:/workspace/common
     shm_size: 512m
     labels:
@@ -50,7 +55,7 @@ services:
     volumes:
       - ./files/user2:/workspace
       - ./files/common:/workspace/common
-    shm_size: "512m"
+    shm_size: 512m
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.u2.entryPoints=web"

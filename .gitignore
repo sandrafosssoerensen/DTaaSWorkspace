@@ -5,6 +5,8 @@ env/
 .env/
 ENV/
 __pycache__/
+.pytest_cache/
+poetry.lock
 
 # Runtime data
 pids
@@ -83,5 +85,21 @@ workspaces/test/dtaas/certs/**
 !workspaces/test/dtaas/certs/Dockerfile
 !workspaces/test/dtaas/certs/README.md
 
+# ignore CI-generated TLS certs but keep the forward-auth Dockerfile
+workspaces/test/dtaas/ci/certs/**
+!workspaces/test/dtaas/ci/certs/Dockerfile
+
+# ignore config of workspace admin
+workspaces/src/admin/config.env
+
+
 # temp files for workspace
 .workspace
+
+# poetry files
+dist/
+build/
+*.egg-info/
+.coverage
+
+workspaces/src/admin/config.env

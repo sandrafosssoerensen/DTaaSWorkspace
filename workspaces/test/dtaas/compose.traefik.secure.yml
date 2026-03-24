@@ -1,8 +1,12 @@
 # ⚠️ DEVELOPMENT ONLY - INSECURE CONFIGURATION ⚠️
-# This configuration uses HTTP (not HTTPS) and insecure flags for development/testing.
-# For production deployments with TLS/HTTPS, use compose.traefik.secure.tls.yml instead.
+# This configuration uses Traefik for multi-user scenario.
+# The traefik forward-auth is used for user authorization.
+# This configuration uses HTTP (not HTTPS) and insecure flags
+# for development/testing.
+# For production deployments with TLS/HTTPS, use
+# compose.traefik.secure.tls.yml instead.
 
-name: workspace-traefik-secure
+name: dtaas
 
 services:
   traefik:
@@ -27,40 +31,70 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
+      frontend:
+        aliases:
+          - "${SERVER_DNS}"  # Allows other containers on this network to reach Traefik via the public domain name
+      users:
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    restart: unless-stopped
+    command:
+      - "start-dev"  # DEV ONLY - use 'start' with proper config in production
+      - "--http-relative-path=/auth"
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD?KEYCLOAK_ADMIN_PASSWORD_not_set}
+      - KC_HTTP_ENABLED=true  # HTTP connection from Traefik (HTTPS is terminated at Traefik)
+      - KC_PROXY_HEADERS=xforwarded  # Enable proxy headers for Traefik
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.keycloak.entryPoints=web"
+      - "traefik.http.routers.keycloak.rule=Host(`${SERVER_DNS}`) && PathPrefix(`/auth`)"
+      - "traefik.http.services.keycloak.loadbalancer.server.port=8080"
+    networks:
       - frontend
       - users
 
   traefik-forward-auth:
-    image: thomseddon/traefik-forward-auth:2
+    image: thomseddon/traefik-forward-auth:latest
     restart: unless-stopped
     volumes:
       - ./config/conf:/conf
     environment:
       - LOG_LEVEL=trace
-      - DEFAULT_PROVIDER=generic-oauth
-      - PROVIDERS_GENERIC_OAUTH_AUTH_URL=${OAUTH_URL}/oauth/authorize
-      - PROVIDERS_GENERIC_OAUTH_TOKEN_URL=${OAUTH_URL}/oauth/token
-      - PROVIDERS_GENERIC_OAUTH_USER_URL=${OAUTH_URL}/api/v4/user
-      - PROVIDERS_GENERIC_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}
-      - PROVIDERS_GENERIC_OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET}
-      - PROVIDERS_GENERIC_OAUTH_SCOPE=read_user
+      - DEFAULT_PROVIDER=oidc
+      - PROVIDERS_OIDC_ISSUER_URL=${KEYCLOAK_ISSUER_URL}
+      - PROVIDERS_OIDC_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
+      - PROVIDERS_OIDC_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
       - SECRET=${OAUTH_SECRET}
       - INSECURE_COOKIE=true  # DEV ONLY - set to false with HTTPS in production
       - CONFIG=/conf
-      - AUTH_HOST=${SERVER_DNS:-localhost}
-      - COOKIE_DOMAIN=${SERVER_DNS:-localhost}
+      - AUTH_HOST=${SERVER_DNS}
+      - COOKIE_DOMAIN=${SERVER_DNS}
+      - URL_PATH=/_oauth
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.redirect.entryPoints=web"
-      # - "traefik.http.routers.redirect.rule=PathPrefix(`/_oauth`)"
-      - "traefik.http.routers.redirect.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/_oauth`)"
-      - "traefik.http.routers.redirect.middlewares=traefik-forward-auth"
+      - "traefik.http.routers.redirect.rule=Host(`${SERVER_DNS}`) && PathPrefix(`/_oauth`)"
       - "traefik.http.middlewares.traefik-forward-auth.forwardauth.address=http://traefik-forward-auth:4181"
       - "traefik.http.middlewares.traefik-forward-auth.forwardauth.authResponseHeaders=X-Forwarded-User"
       - "traefik.http.services.traefik-forward-auth.loadbalancer.server.port=4181"
+    extra_hosts:
+      - "${DOCKER_HOST_HOSTNAME:-localhost}:host-gateway"  # Maps hostname to Docker host IP for OIDC discovery
     networks:
       - frontend
       - users
+    depends_on:
+      - keycloak
 
   client:
     image: intocps/dtaas-web:latest
@@ -72,7 +106,7 @@ services:
       - "traefik.http.routers.client.entryPoints=web"
       - "traefik.http.services.client.loadbalancer.server.port=4000"
       - "traefik.http.routers.client.middlewares=traefik-forward-auth"
-      - "traefik.http.routers.client.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/`)"
+      - "traefik.http.routers.client.rule=Host(`${SERVER_DNS}`) && PathPrefix(`/`)"
     networks:
       - frontend
 
@@ -80,8 +114,8 @@ services:
     image: workspace:latest
     restart: unless-stopped
     build:
-      context: .
-      dockerfile: ../Dockerfile.ubuntu.noble.gnome
+      context: ../..
+      dockerfile: Dockerfile.ubuntu.noble.gnome
     environment:
       - MAIN_USER=${USERNAME1:-user1}
     volumes:
@@ -91,7 +125,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.u1.entryPoints=web"
-      - "traefik.http.routers.u1.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME1:-user1}`)"
+      - "traefik.http.routers.u1.rule=Host(`${SERVER_DNS}`) && PathPrefix(`/${USERNAME1:-user1}`)"
       - "traefik.http.routers.u1.middlewares=traefik-forward-auth"
     networks:
       - users
@@ -109,7 +143,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.u2.entryPoints=web"
-      - "traefik.http.routers.u2.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME2:-user2}`)"
+      - "traefik.http.routers.u2.rule=Host(`${SERVER_DNS}`) && PathPrefix(`/${USERNAME2:-user2}`)"
       - "traefik.http.routers.u2.middlewares=traefik-forward-auth"
     networks:
       - users
@@ -119,3 +153,6 @@ networks:
     name: dtaas-frontend
   users:
     name: dtaas-users
+volumes:
+  keycloak-data:
+    driver: local

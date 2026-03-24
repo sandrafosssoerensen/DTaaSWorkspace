@@ -30,7 +30,7 @@ to use the local image.
 Disregard this directory's usual requirement of the presence of
 the private key and full certificate chain.
 
-(Ensure that your `/env/hosts` file point your domain to 127.0.0.1)
+(Ensure that your `/etc/hosts` file point your domain to 127.0.0.1)
 
 #### ***Generate certificates***
 
@@ -62,7 +62,7 @@ Update the `traefik-forward-auth` service definition in the
 `compose.traefik.secure.tls.yml` file by replacing the line
 
 ```yaml
-image: thomseddon/traefik-forward-auth:2
+image: thomseddon/traefik-forward-auth:2.2.0
 ```
 
 with

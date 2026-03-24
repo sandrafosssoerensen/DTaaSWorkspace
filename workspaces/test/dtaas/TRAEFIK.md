@@ -20,45 +20,32 @@ The `compose.traefik.yml` file sets up:
 
 Traefik routes requests to different workspace instances based on URL path prefixes.
 
-## 💪 Get Workspace Image
+## ⚙️ Initial Configuration
 
-You can either use a pre-built image or build it locally.
+Please follow the steps in [`CONFIGURATION.md`](CONFIGURATION.md) for
+the `compose.traefik.yml` composition before running the setup.
 
-### Option 1: Use Pre-built Image (Recommended)
+## Create Workspace Files
 
-Pull the latest image from GitHub Container Registry or Docker Hub:
-
-```bash
-# From GitHub Container Registry
-docker pull ghcr.io/into-cps-association/workspace:latest
-docker tag ghcr.io/into-cps-association/workspace:latest workspace:latest
-
-# Or from Docker Hub
-docker pull intocpsassociation/workspace:latest
-docker tag intocpsassociation/workspace:latest workspace:latest
-```
-
-### Option 2: Build Locally
-First navigate to the `workspaces/` directory.
-
-Then build the workspace image, either with docker compose:
+All the deployment options require user directories for
+storing workspace files. These need to
+be created for `USERNAME1` and `USERNAME2` set in
+`workspaces/test/dtaas/config/.env` file.
 
 ```bash
-docker compose -f test/dtaas/compose.traefik.yml build user1
-```
-
-Or using the standard build command:
-
-```bash
-docker build -t workspace:latest -f Dockerfile.ubuntu.noble.gnome .
+# create required files
+cp -R workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/<USERNAME1>
+cp -R workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/<USERNAME2>
+# set file permissions for use inside the container
+sudo chown -R 1000:100 workspaces/test/dtaas/files
 ```
 
 ## :rocket: Start Services
 
-To start all services (Traefik and both workspace instances), from within the `workspaces/` directory:
+To start all services (Traefik and both workspace instances):
 
 ```bash
-docker compose -f test/dtaas/compose.traefik.yml up -d
+docker compose -f workspaces/test/dtaas/compose.traefik.yml --env-file workspaces/test/dtaas/config/.env up -d
 ```
 
 This will:
@@ -77,6 +64,49 @@ Once all services are running, access the workspaces through Traefik:
 - **Jupyter Notebook**: `http://localhost/user1`
 - **Jupyter Lab**: `http://localhost/user1/lab`
 
+#### Service Discovery
+
+The workspace provides a `/services` endpoint that returns a JSON list of
+available services. This enables dynamic service discovery for frontend
+applications.
+
+**Example**: Get service list for user1
+
+```bash
+curl http://localhost/user1/services
+```
+
+**Response**:
+
+```json
+{
+  "desktop": {
+    "name": "Desktop",
+    "description": "Virtual Desktop Environment",
+    "endpoint": "tools/vnc?path=user1%2Ftools%2Fvnc%2Fwebsockify"
+  },
+  "vscode": {
+    "name": "VS Code",
+    "description": "VS Code IDE",
+    "endpoint": "tools/vscode"
+  },
+  "notebook": {
+    "name": "Jupyter Notebook",
+    "description": "Jupyter Notebook",
+    "endpoint": ""
+  },
+  "lab": {
+    "name": "Jupyter Lab",
+    "description": "Jupyter Lab IDE",
+    "endpoint": "lab"
+  }
+}
+```
+
+The endpoint values are dynamically populated with the user's username from the
+`MAIN_USER` environment variable. This variable corresponds to `USERNAME1` of
+`.env` file.
+
 ### User2 Workspace (ml-workspace-minimal)
 
 - **VNC Desktop**: `http://localhost/user2/tools/vnc/?password=vncpassword`
@@ -84,12 +114,21 @@ Once all services are running, access the workspaces through Traefik:
 - **Jupyter Notebook**: `http://localhost/user2`
 - **Jupyter Lab**: `http://localhost/user2/lab`
 
+### Custom URL
+
+Remember to change the following variables in URLs to the variable values
+specified in `.env`:
+
+- Change `user1` to `USERNAME1` value
+- Change `user2` to `USERNAME2` value
+- Change `localhost` in URL to the `SERVER_DNS` value
+
 ## 🛑 Stopping Services
 
 To stop all services:
 
 ```bash
-docker compose -f test/dtaas/compose.traefik.yml down
+docker compose -f workspaces/test/dtaas/compose.traefik.yml --env-file workspaces/test/dtaas/config/.env down
 ```
 
 ## 🔧 Customization
@@ -122,7 +161,7 @@ user3:
 And then, setup the base structure of the persistent directories for the new user:
 
 ```bash
-cp -r test/dtaas/files/user1 test/dtaas/files/user3
+cp -r workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/user3
 ```
 
 ## :shield: Security Considerations

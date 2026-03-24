@@ -1,17 +1,21 @@
+# ⚠️ DEVELOPMENT ONLY - INSECURE CONFIGURATION ⚠️
+# This configuration runs single-user workspace in HTTP mode for development/testing.
+# For production deployments with TLS/HTTPS, use compose.traefik.secure.tls.yml instead.
+
 services:
   workspace:
     image: workspace:latest
     container_name: workspace
     build:
-      context: ../../
+      context: ../..
       dockerfile: Dockerfile.ubuntu.noble.gnome
     environment:
       - MAIN_USER=${USERNAME1:-user1}
     ports:
-      - "8080:8080"
+      - "80:8080"
     shm_size: 512m
     volumes:
-      - ./files/user1:/workspace
+      - ./files/${USERNAME1:-user1}:/workspace
       - ./files/common:/workspace/common
     develop:
       watch:
