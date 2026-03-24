@@ -1,7 +1,7 @@
-# Workspace with Traefik, OAuth2, and TLS
+# Workspace with Traefik, Oathkeeper, and TLS
 
 This guide explains how to deploy the workspace container with Traefik reverse
-proxy, OAuth2 authentication, and TLS/HTTPS support for secure multi-user
+proxy, Oathkeeper JWT/OPA authorization, and TLS/HTTPS support for secure multi-user
 deployments.
 
 ## ❓ Prerequisites
@@ -19,7 +19,7 @@ The `compose.traefik.secure.tls.yml` file provides a production-ready setup with
 
 - **Traefik** reverse proxy with TLS termination (ports 80, 443)
 - **Automatic HTTP to HTTPS redirect**
-- **OAuth2 authentication** via traefik-forward-auth
+- **JWT authentication and authorization** via Ory Oathkeeper + OPA
 - **Multiple workspace instances** (user1, user2) behind authentication
 - **Secure communication** with TLS certificates
 - **user1** workspace using the workspace image
@@ -57,7 +57,7 @@ This will:
 
 1. Start Traefik reverse proxy with TLS on ports 80 (HTTP → HTTPS redirect)
    and 443 (HTTPS)
-2. Start traefik-forward-auth service for OAuth2 authentication
+2. Start Oathkeeper and OPA authorization services
 3. Start workspace instances for user1 and user2, protected by
    authentication
 
@@ -126,15 +126,14 @@ The endpoint values are dynamically populated with the user's username from the
 
 - **Dashboard**: `https://yourdomain.com/dashboard/` (requires authentication)
 
-## 🔒 Authentication Flow
+## 🔒 Authorization Flow
 
 1. User attempts to access a workspace URL
-2. Traefik forwards the request to traefik-forward-auth
-3. If not authenticated, user is redirected to OAuth2 provider
-4. User logs in with OAuth2 provider
-5. Provider redirects back with authorization code
-6. traefik-forward-auth exchanges code for token and creates session
-7. User is redirected to original URL and gains access
+2. Traefik forwards the request to Oathkeeper ForwardAuth decision API
+3. Oathkeeper validates the Bearer JWT signature, issuer, and audience
+4. Oathkeeper asks OPA to evaluate per-user path authorization policy
+5. If allowed, Traefik forwards the request to the target workspace service
+6. If denied, request is rejected with an authorization error
 
 ## 🛑 Stopping Services
 
@@ -172,7 +171,7 @@ To add additional workspace instances, add a new service in `compose.traefik.sec
       - "traefik.enable=true"
       - "traefik.http.routers.u3.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME3:-user3}`)"
       - "traefik.http.routers.u3.tls=true"
-      - "traefik.http.routers.u3.middlewares=traefik-forward-auth"
+      - "traefik.http.routers.u3.middlewares=oathkeeper-auth"
     networks:
       - users
 ```
@@ -188,16 +187,9 @@ USERNAME2=user2
 USERNAME3=user3 # <--- replace "user3" with your desired username
 ```
 
-Add Forward Auth config for user3 in [`conf`](./config/conf):
-
-```txt
-
-rule.user3_access.action=auth
-rule.user3_access.rule=PathPrefix(`/user3`)
-rule.user3_access.whitelist = user3@localhost 
-```
-
-Ensure that the username and email correspond to the workspaces GitLab user.
+Ensure your OPA policy allows the new user's path prefix. The default policy in
+[`policy.rego`](./config/oathkeeper/policy.rego) already authorizes access when
+the first URL segment matches `preferred_username` and the user is in `dtaas`.
 
 Don't forget to create the user's directory:
 
@@ -206,31 +198,10 @@ cp -r ./workspaces/test/dtaas/files/user1 ./workspaces/test/dtaas/files/user3
 sudo chown -R 1000:100 workspaces/test/dtaas/files
 ```
 
-### Using Different OAuth2 Providers
+### Using Different Identity Providers
 
-The configuration can be adapted for different OAuth2 providers by changing
-the environment variables in the `traefik-forward-auth` service:
-
-#### Google OAuth2
-
-```yaml
-environment:
-  - DEFAULT_PROVIDER=google
-  - PROVIDERS_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-  - PROVIDERS_GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-  - SECRET=${OAUTH_SECRET}
-```
-
-#### Generic OIDC Provider
-
-```yaml
-environment:
-  - DEFAULT_PROVIDER=oidc
-  - PROVIDERS_OIDC_ISSUER_URL=https://your-oidc-provider.com
-  - PROVIDERS_OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
-  - PROVIDERS_OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
-  - SECRET=${OAUTH_SECRET}
-```
+To use another OIDC-compatible provider, update Oathkeeper environment values
+for JWKS URL, trusted issuer, and target audience in the compose file.
 
 ## 🐛 Troubleshooting
 
@@ -245,16 +216,16 @@ environment:
 - Ensure `dynamic/tls.yml` correctly references certificate paths
 - For self-signed certs, add security exception in browser
 
-### OAuth2 Issues
+### Oathkeeper/OPA Issues
 
-**Problem**: Redirect loop after OAuth2 login
+**Problem**: Authorized user still gets access denied
 
 **Solutions**:
 
-- Verify OAuth2 callback URL matches `https://yourdomain.com/_oauth`
-- Check `SERVER_DNS` environment variable is set correctly
-- Ensure `COOKIE_DOMAIN` matches your domain
-- Verify OAuth2 application is approved and active
+- Verify the request includes `Authorization: Bearer <token>`
+- Check `KEYCLOAK_ISSUER_URL`, `KEYCLOAK_JWKS_URL`, and `KEYCLOAK_TARGET_AUDIENCE`
+- Verify the token contains `preferred_username` and `groups`
+- Check OPA policy decisions and Oathkeeper logs
 
 ### Service Access Issues
 
@@ -267,8 +238,8 @@ environment:
 - View logs: `docker compose -f compose.traefik.secure.tls.yml logs`
 - Verify Traefik routes:
   `docker compose -f compose.traefik.secure.tls.yml logs traefik`
-- Test OAuth2 service:
-  `docker compose -f compose.traefik.secure.tls.yml logs traefik-forward-auth`
+- Test Oathkeeper/OPA services:
+  `docker compose -f compose.traefik.secure.tls.yml logs oathkeeper opa`
 
 ### Port Conflicts
 
@@ -283,18 +254,19 @@ environment:
 ## 📚 Additional Resources
 
 - [Traefik Documentation](https://doc.traefik.io/traefik/)
-- [Traefik Forward Auth](https://github.com/thomseddon/traefik-forward-auth)
+- [Ory Oathkeeper Documentation](https://www.ory.sh/docs/oathkeeper/)
+- [Open Policy Agent Documentation](https://www.openpolicyagent.org/docs/latest/)
 - [Let's Encrypt Documentation](https://letsencrypt.org/docs/)
 - [Docker Compose Documentation](https://docs.docker.com/compose/)
 - [OAuth 2.0 Specification](https://oauth.net/2/)
 
 ## 🔄 Alternative Configurations
 
-### HTTP-Only with OAuth2 (Development)
+### HTTP-Only with Oathkeeper (Development)
 
 For development environments where TLS is not required, see [`TRAEFIK_SECURE.md`](TRAEFIK_SECURE.md).
 
-This provides OAuth2 authentication without TLS encryption.
+This provides Oathkeeper/OPA authorization without TLS encryption.
 
 ### Basic Traefik (No Auth, No TLS)
 

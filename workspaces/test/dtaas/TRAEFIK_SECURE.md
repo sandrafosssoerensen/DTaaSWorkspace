@@ -1,8 +1,8 @@
-# Workspace with Traefik Forward Auth (OIDC/Keycloak Security)
+# Workspace with Traefik, Oathkeeper, and Keycloak Security
 
-This guide explains how to use the workspace container with Traefik reverse proxy
-and OIDC authentication via Keycloak and traefik-forward-auth for secure multi-user deployments
-in the DTaaS installation.
+This guide explains how to use the workspace container with Traefik reverse proxy,
+JWT authentication via Ory Oathkeeper, and policy authorization via OPA for secure
+multi-user deployments in the DTaaS installation.
 
 ## ❓ Prerequisites
 
@@ -16,7 +16,8 @@ The `compose.traefik.secure.yml` file sets up:
 
 - **Traefik** reverse proxy on port 80
 - **Keycloak** identity provider with OIDC support
-- **traefik-forward-auth** for OIDC authentication
+- **Ory Oathkeeper** for JWT verification and auth decisioning
+- **OPA (Open Policy Agent)** for per-user path authorization policies
 - **client** - DTaaS web interface
 - **user1** workspace using the workspace image
 - **user2** workspace using the mltooling/ml-workspace-minimal image
@@ -56,7 +57,7 @@ This will:
 
 1. Start the Traefik reverse proxy on port 80
 2. Start Keycloak identity provider at `/auth`
-3. Start traefik-forward-auth for OIDC authentication
+3. Start Oathkeeper and OPA authorization services
 4. Start the DTaaS web client interface
 5. Start workspace instances for both users
 
@@ -233,7 +234,7 @@ To add additional workspace instances, add a new service in `compose.traefik.sec
       - "traefik.enable=true"
       - "traefik.http.routers.u3.entryPoints=web"
       - "traefik.http.routers.u3.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME3:-user3}`)"
-      - "traefik.http.routers.u3.middlewares=traefik-forward-auth"
+      - "traefik.http.routers.u3.middlewares=oathkeeper-auth"
     networks:
       - users
 ```
@@ -256,30 +257,15 @@ cp -r workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/user3
 sudo chown -R 1000:100 workspaces/test/dtaas/files
 ```
 
-### Using a Different OAuth Provider
+### Using a Different Identity Provider
 
-traefik-forward-auth supports multiple OAuth providers including GitLab, Google, Okta, and generic OAuth2.
+Oathkeeper validates JWTs using JWKS and trusted issuer settings. You can switch
+identity providers if they expose OIDC-compatible discovery/JWKS endpoints.
 
-**To use GitLab instead of Keycloak:**
-
-1. Update the traefik-forward-auth environment in `compose.traefik.secure.yml`:
-   ```yaml
-   environment:
-     - DEFAULT_PROVIDER=generic-oauth
-     - PROVIDERS_GENERIC_OAUTH_AUTH_URL=${OAUTH_URL}/oauth/authorize
-     - PROVIDERS_GENERIC_OAUTH_TOKEN_URL=${OAUTH_URL}/oauth/token
-     - PROVIDERS_GENERIC_OAUTH_USER_URL=${OAUTH_URL}/api/v4/user
-     - PROVIDERS_GENERIC_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}
-     - PROVIDERS_GENERIC_OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET}
-     - PROVIDERS_GENERIC_OAUTH_SCOPE=read_user
-   ```
-2. Remove the `keycloak` service from the compose file
-3. Configure GitLab OAuth application (see [CONFIGURATION.md](CONFIGURATION.md))
-4. Update `.env` with GitLab OAuth credentials
-
-See [traefik-forward-auth documentation][tfa-docs] for other providers.
-
-[tfa-docs]: https://github.com/thomseddon/traefik-forward-auth
+1. Update `KEYCLOAK_JWKS_URL` and `KEYCLOAK_ISSUER_URL` in Oathkeeper environment.
+2. Ensure tokens include the expected audience (`KEYCLOAK_TARGET_AUDIENCE`).
+3. Keep the OPA policy contract stable (`preferred_username`, `groups`) or update
+  [config/oathkeeper/policy.rego](config/oathkeeper/policy.rego) accordingly.
 
 ### Using External Keycloak
 
@@ -351,10 +337,10 @@ If Keycloak displays "We are sorry... HTTPS required" when accessed via HTTP:
 If you're stuck in an authentication loop:
 
 1. Clear browser cookies for localhost
-2. Check that `OAUTH_SECRET` is set and consistent
-3. Verify Keycloak client redirect URI matches `http://localhost/_oauth/*`
-4. Check traefik-forward-auth logs for errors
-5. Ensure `KEYCLOAK_ISSUER_URL` is correct
+2. Verify your browser sends `Authorization: Bearer <access_token>` requests
+3. Ensure `KEYCLOAK_ISSUER_URL` and `KEYCLOAK_JWKS_URL` are correct
+4. Check Oathkeeper logs for JWT validation errors
+5. Check OPA logs for authorization denials
 
 ### Services Not Accessible
 
@@ -368,9 +354,9 @@ If you're stuck in an authentication loop:
    docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml logs traefik
    ```
 
-3. Check traefik-forward-auth logs:
+3. Check Oathkeeper and OPA logs:
    ```bash
-   docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml logs traefik-forward-auth
+  docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml logs oathkeeper opa
    ```
 
 ### OIDC/OAuth Errors
@@ -381,7 +367,7 @@ If you see OIDC errors:
 2. Check Keycloak client settings (client ID, secret, redirect URIs)
 3. Ensure Keycloak realm name matches `KEYCLOAK_REALM`
 4. Verify client authentication is enabled in Keycloak
-5. Check that the issuer URL is accessible from the traefik-forward-auth container
+5. Check that the issuer URL is accessible from the `oathkeeper` container
 
 ### "Invalid Client" Error
 
@@ -395,6 +381,7 @@ If you see OIDC errors:
 - [CONFIGURATION.md](CONFIGURATION.md) - General configuration guide
 - [Traefik Documentation](https://doc.traefik.io/traefik/)
 - [Keycloak Documentation](https://www.keycloak.org/documentation)
-- [traefik-forward-auth GitHub](https://github.com/thomseddon/traefik-forward-auth)
+- [Ory Oathkeeper Documentation](https://www.ory.sh/docs/oathkeeper/)
+- [Open Policy Agent Documentation](https://www.openpolicyagent.org/docs/latest/)
 - [OIDC Specification](https://openid.net/specs/openid-connect-core-1_0.html)
 - [DTaaS Documentation](https://github.com/INTO-CPS-Association/DTaaS)

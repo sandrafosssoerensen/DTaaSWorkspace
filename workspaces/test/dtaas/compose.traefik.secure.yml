@@ -1,5 +1,5 @@
 # ⚠️ DEVELOPMENT ONLY - INSECURE CONFIGURATION ⚠️
-# This configuration uses Traefik for multi-user scenario. The traefik forward-auth is used for user authorization.
+# This configuration uses Traefik for multi-user scenario. Oathkeeper + OPA are used for authorization.
 # This configuration uses HTTP (not HTTPS) and insecure flags for development/testing.
 # For production deployments with TLS/HTTPS, use compose.traefik.secure.tls.yml instead.
 
@@ -60,39 +60,54 @@ services:
       - frontend
       - users
 
-  traefik-forward-auth:
-    image: thomseddon/traefik-forward-auth:2.2.0
+  oathkeeper:
+    image: oryd/oathkeeper:v0.40.8
     restart: unless-stopped
+    # Serve both the proxy (4455) and the decision API (4456).
+    # Traefik ForwardAuth calls the decision API at http://oathkeeper:4456/decisions.
+    command: serve -c /etc/oathkeeper/config/oathkeeper.yml
     volumes:
-      - ./config/conf:/conf
+      - ./config/oathkeeper:/etc/oathkeeper/config
     environment:
-      - LOG_LEVEL=trace
-      - DEFAULT_PROVIDER=generic-oauth
-      - PROVIDERS_GENERIC_OAUTH_AUTH_URL=http://${SERVER_DNS:-localhost}/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/auth
-      - PROVIDERS_GENERIC_OAUTH_TOKEN_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/token
-      - PROVIDERS_GENERIC_OAUTH_USER_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/userinfo
-      - PROVIDERS_GENERIC_OAUTH_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
-      - PROVIDERS_GENERIC_OAUTH_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
-      - PROVIDERS_GENERIC_OAUTH_SCOPE=openid,profile,email
-      - SECRET=${OAUTH_SECRET}
-      - INSECURE_COOKIE=true  # DEV ONLY - set to false with HTTPS in production
-      - CONFIG=/conf
-      - AUTH_HOST=${SERVER_DNS:-localhost}
-      - COOKIE_DOMAIN=${SERVER_DNS:-localhost}
-      - URL_PATH=/_oauth
+      # Internal Keycloak JWKS URL (container-to-container, always HTTP).
+      # Oathkeeper fetches public signing keys here to verify JWT signatures.
+      - KEYCLOAK_JWKS_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/certs
+      # Public Keycloak issuer URL. Must match exactly the 'iss' claim in JWTs.
+      # In HTTP mode, Keycloak sets KC_HOSTNAME to http://<SERVER_DNS>/auth,
+      # so the issuer in issued tokens is http://<SERVER_DNS>/auth/realms/<realm>.
+      - KEYCLOAK_ISSUER_URL=http://${SERVER_DNS:-localhost}/auth/realms/${KEYCLOAK_REALM:-dtaas}
+      # Required audience ('aud' claim) in JWT access tokens.
+      - KEYCLOAK_TARGET_AUDIENCE=${KEYCLOAK_CLIENT_ID:-dtaas-workspace}
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.redirect.entryPoints=web"
-      - "traefik.http.routers.redirect.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/_oauth`)"
-      - "traefik.http.routers.redirect.middlewares=traefik-forward-auth"
-      - "traefik.http.middlewares.traefik-forward-auth.forwardauth.address=http://traefik-forward-auth:4181"
-      - "traefik.http.middlewares.traefik-forward-auth.forwardauth.authResponseHeaders=X-Forwarded-User"
-      - "traefik.http.services.traefik-forward-auth.loadbalancer.server.port=4181"
+      # Define the ForwardAuth middleware. Traefik sends workspace requests here
+      # for JWT validation before forwarding to the workspace service.
+      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.address=http://oathkeeper:4456/decisions"
+      # Forward authenticated user identity headers from Oathkeeper to upstream services.
+      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authResponseHeaders=X-User-Name,X-User-Subject"
+      # Forward the Authorization header (Bearer token) from the client to Oathkeeper.
+      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authRequestHeaders=Authorization"
     networks:
       - frontend
       - users
     depends_on:
-      - keycloak
+      keycloak:
+        condition: service_healthy
+      opa:
+        condition: service_started
+
+  opa:
+    image: openpolicyagent/opa:0.70.0
+    restart: unless-stopped
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - /policies/policy.rego
+    volumes:
+      - ./config/oathkeeper/policy.rego:/policies/policy.rego
+    networks:
+      - users
 
   client:
     image: intocps/dtaas-web:new-workspace
@@ -103,7 +118,9 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.client.entryPoints=web"
       - "traefik.http.services.client.loadbalancer.server.port=4000"
-      - "traefik.http.routers.client.middlewares=traefik-forward-auth"
+      # No auth middleware on the client: the DTaaS web app is a public SPA that
+      # handles its own OIDC PKCE flow with Keycloak. Oathkeeper protects only
+      # the workspace service paths (user1, user2) below.
       - "traefik.http.routers.client.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/`)"
     networks:
       - frontend
@@ -124,7 +141,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.u1.entryPoints=web"
       - "traefik.http.routers.u1.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME1:-user1}`)"
-      - "traefik.http.routers.u1.middlewares=traefik-forward-auth"
+      - "traefik.http.routers.u1.middlewares=oathkeeper-auth"
     networks:
       - users
 
@@ -142,7 +159,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.u2.entryPoints=web"
       - "traefik.http.routers.u2.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME2:-user2}`)"
-      - "traefik.http.routers.u2.middlewares=traefik-forward-auth"
+      - "traefik.http.routers.u2.middlewares=oathkeeper-auth"
     networks:
       - users
 
