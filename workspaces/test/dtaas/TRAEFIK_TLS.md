@@ -124,7 +124,11 @@ The endpoint values are dynamically populated with the user's username from the
 
 ### Traefik Dashboard
 
-- **Dashboard**: `https://yourdomain.com/dashboard/` (requires authentication)
+- Dashboard is disabled by default in the hardened setup.
+- To expose it securely:
+  1. Set `TRAEFIK_DASHBOARD_USERS` in `config/.env` using an `htpasswd` bcrypt hash.
+  2. Uncomment the dashboard labels in `compose.traefik.secure.tls.yml`.
+  3. Access `https://yourdomain.com/dashboard/`.
 
 ## 🔒 Authorization Flow
 
@@ -134,6 +138,27 @@ The endpoint values are dynamically populated with the user's username from the
 4. Oathkeeper asks OPA to evaluate per-user path authorization policy
 5. If allowed, Traefik forwards the request to the target workspace service
 6. If denied, request is rejected with an authorization error
+
+## ✅ PKCE + Oathkeeper + OPA Verification Checklist
+
+Run this checklist after deployment to confirm secure authentication and
+authorization behavior.
+
+1. Start the TLS stack:
+  `docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env up -d`
+2. Verify services are healthy:
+  `docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml ps`
+3. Verify login uses Keycloak PKCE flow in browser (no password grant from the client).
+4. After login, confirm workspace access with own path succeeds:
+  `https://<SERVER_DNS>/<USERNAME1>/`
+5. Confirm cross-user access is denied:
+  log in as `USERNAME1` and request `https://<SERVER_DNS>/<USERNAME2>/`
+6. Validate JWT checks in Oathkeeper logs (issuer, signature, audience):
+  `docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml logs oathkeeper`
+7. Validate OPA authorization decisions for allow/deny events:
+  `docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml logs opa`
+8. Confirm token claims include `preferred_username` and `groups`.
+9. Ensure Traefik insecure API is not enabled in compose configuration.
 
 ## 🛑 Stopping Services
 

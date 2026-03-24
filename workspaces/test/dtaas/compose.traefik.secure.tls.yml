@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     command:
       - "--log.level=DEBUG"
-      - "--api.insecure=true"
+      - "--api.dashboard=true"
       - "--providers.docker=true"
       - "--entryPoints.web.address=:80"
       - "--entrypoints.web-secure.address=:443"
@@ -13,6 +13,16 @@ services:
       - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
       - "--providers.file.directory=/etc/traefik"
       - "--providers.file.watch=true"
+    # Dashboard is not exposed by default. To expose it securely, uncomment the
+    # labels below and set TRAEFIK_DASHBOARD_USERS in config/.env.
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.traefik-dashboard.rule=Host(`${SERVER_DNS:-localhost}`) && (PathPrefix(`/dashboard`) || PathPrefix(`/api`))"
+    #   - "traefik.http.routers.traefik-dashboard.entryPoints=web-secure"
+    #   - "traefik.http.routers.traefik-dashboard.tls=true"
+    #   - "traefik.http.routers.traefik-dashboard.service=api@internal"
+    #   - "traefik.http.routers.traefik-dashboard.middlewares=traefik-dashboard-auth"
+    #   - "traefik.http.middlewares.traefik-dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_USERS}"
     ports:
       - "80:80"
       - "443:443"
