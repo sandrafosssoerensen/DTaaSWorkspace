@@ -313,8 +313,8 @@ class KeycloakIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         """Create and bootstrap the temporary Keycloak test environment."""
-        cls.admin_user = "admin"
-        cls.admin_password = "admin"
+        cls.admin_user = f"admin-{uuid.uuid4().hex[:8]}"
+        cls.admin_password = uuid.uuid4().hex
         cls.container_name = f"keycloak-int-{uuid.uuid4().hex[:8]}"
         configured_port = os.getenv("KEYCLOAK_INTEGRATION_PORT", "")
         cls.port = int(configured_port) if configured_port else find_free_port()
