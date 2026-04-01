@@ -119,8 +119,8 @@ services:
 
 
   traefik-forward-auth:
-    image: thomseddon/traefik-forward-auth:latest
-    #image: traefik-forward-auth-local:latest
+    # Local image includes the mkcert root CA so OIDC issuer TLS can be verified.
+    image: traefik-forward-auth-local:latest
     restart: unless-stopped
     volumes:
       - "./config/conf:/conf"

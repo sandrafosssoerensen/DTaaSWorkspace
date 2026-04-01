@@ -143,6 +143,47 @@ def resolve_client_uuid(base_url: str, token: str, realm: str, client_id: str) -
     raise RuntimeError(f"Could not resolve client UUID for clientId '{client_id}'")
 
 
+def resolve_admin_roles_client(
+    base_url: str, token: str, realm: str = "master"
+) -> tuple[str, str]:
+    """Resolve the admin-roles client across Keycloak version differences."""
+    clients = http_json(
+        f"{base_url}/admin/realms/{realm}/clients?max=500", token=token
+    )
+    for candidate in ["realm-management", "master-realm"]:
+        for client in clients:
+            if client.get("clientId") == candidate and client.get("id"):
+                return candidate, client["id"]
+
+    visible = sorted(
+        str(client.get("clientId", "")) for client in clients if client.get("clientId")
+    )
+    preview = ", ".join(visible[:25]) if visible else "<none>"
+    raise RuntimeError(
+        "Could not resolve admin roles client in master realm. "
+        f"Expected one of ['realm-management', 'master-realm']. Visible: {preview}"
+    )
+
+
+def wait_for_admin_roles_client(
+    base_url: str, token: str, realm: str = "master", timeout: int = 60
+) -> None:
+    """Wait for admin roles client to become available in Keycloak."""
+    deadline = time.time() + timeout
+    last_error = None
+    while time.time() < deadline:
+        try:
+            resolve_admin_roles_client(base_url, token, realm)
+            return
+        except RuntimeError as exc:
+            last_error = exc
+            time.sleep(1)
+
+    if last_error:
+        raise RuntimeError(f"{last_error} after waiting {timeout}s") from last_error
+    raise RuntimeError(f"Timeout waiting for admin roles client in realm '{realm}'")
+
+
 def wait_for_client_availability(
     base_url: str, token: str, realm: str, client_id: str, timeout: int = 60
 ) -> None:
@@ -215,7 +256,7 @@ def create_admin_service_account_client(
     )
     service_account_user_id = service_account_user["id"]
 
-    realm_mgmt_id = resolve_client_uuid(base_url, token, "master", "realm-management")
+    _, realm_mgmt_id = resolve_admin_roles_client(base_url, token, "master")
 
     roles_to_assign: list[dict[str, Any]] = []
     for role_name in [
@@ -239,6 +280,24 @@ def create_admin_service_account_client(
         method="POST",
         token=token,
         data=roles_to_assign,
+    )
+
+    # Keycloak 26 requires master realm role mapping for cross-realm admin actions.
+    admin_realm_role = http_json(
+        f"{base_url}/admin/realms/master/roles/admin",
+        token=token,
+    )
+    http_json(
+        f"{base_url}/admin/realms/master/users/{service_account_user_id}"
+        "/role-mappings/realm",
+        method="POST",
+        token=token,
+        data=[
+            {
+                "id": admin_realm_role["id"],
+                "name": admin_realm_role["name"],
+            }
+        ],
     )
 
     return client_id, client_secret
@@ -271,15 +330,14 @@ class KeycloakIntegrationTests(unittest.TestCase):
             cls.wait_until_ready()
 
             token = admin_token(cls.base_url, cls.admin_user, cls.admin_password)
-            # Ensure built-in master realm clients are available before proceeding
+            # Ensure built-in master realm admin roles client is available before proceeding
             client_wait_timeout = int(
                 os.getenv("KEYCLOAK_CLIENT_AVAILABILITY_TIMEOUT", "180")
             )
-            wait_for_client_availability(
+            wait_for_admin_roles_client(
                 cls.base_url,
                 token,
                 "master",
-                "realm-management",
                 timeout=client_wait_timeout,
             )
             create_realm(cls.base_url, token, cls.realm)
@@ -390,6 +448,17 @@ class KeycloakIntegrationTests(unittest.TestCase):
 
     def test_script_configures_claims_via_service_account(self) -> None:
         """Validate end-to-end claims setup via service-account auth path."""
+        token = admin_token(self.base_url, self.admin_user, self.admin_password)
+        users_before = http_json(
+            f"{self.base_url}/admin/realms/{self.realm}/users?username={self.username}",
+            token=token,
+        )
+        user_id_before = users_before[0]["id"]
+        attrs_before = http_json(
+            f"{self.base_url}/admin/realms/{self.realm}/users/{user_id_before}",
+            token=token,
+        ).get("attributes", {})
+
         env = os.environ.copy()
         env.update(
             {
@@ -454,7 +523,9 @@ class KeycloakIntegrationTests(unittest.TestCase):
             f"{self.base_url}/admin/realms/{self.realm}/users/{user_id}", token=token
         )
         attributes = user_details.get("attributes", {})
-        self.assertEqual(attributes.get("department"), ["eng"])
+        for key, value in attrs_before.items():
+            if key != "profile":
+                self.assertEqual(attributes.get(key), value)
         self.assertEqual(
             attributes.get("profile"), [f"https://localhost/gitlab/{self.username}"]
         )
