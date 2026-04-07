@@ -48,7 +48,8 @@ def http_json(
 
     request = Request(url, method=method, headers=headers, data=body)
     try:
-        with urlopen(request) as response:  # noqa: S310 - integration test target is controlled
+        # noqa: S310 - integration test target is controlled
+        with urlopen(request, timeout=30) as response:
             raw = response.read().decode("utf-8")
             return json.loads(raw) if raw else {}
     except HTTPError as exc:

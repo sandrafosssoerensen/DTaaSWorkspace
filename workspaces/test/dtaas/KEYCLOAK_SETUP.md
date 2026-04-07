@@ -271,8 +271,9 @@ the realm, and sets each user's `profile` attribute to
 `<PROFILE_BASE_URL>/<username>` (merge-safe — other existing attributes are
 preserved).
 
-See [scripts/keycloak/CONFIGURE_KEYCLOAK.md](../../scripts/keycloak/CONFIGURE_KEYCLOAK.md)
-for full environment variable reference.
+For the full environment variable reference, run the configurator with `--help`
+or see the inline documentation in
+`workspaces/test/dtaas/keycloak/configure_keycloak_rest.py`.
 
 ### Role-Based Access Control (RBAC)
 

@@ -3,6 +3,7 @@
 
 This module mirrors the shell-based REST script behavior using Python only.
 """
+# pylint: disable=duplicate-code
 
 # Only using Python's standard library
 from __future__ import annotations
@@ -11,6 +12,7 @@ import os
 import sys
 from dataclasses import dataclass
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -289,7 +291,7 @@ class KeycloakRestConfigurator:
             existing_attributes = user_details.get("attributes", {})
             merged_attributes = dict(existing_attributes)
             merged_attributes["profile"] = [
-                f"{self.settings.profile_base_url}/{username}"
+                f"{self.settings.profile_base_url.rstrip('/')}/{username}"
             ]
 
             payload = dict(user_details)
@@ -316,14 +318,21 @@ class KeycloakRestConfigurator:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         request = Request(url, method=method, headers=headers, data=data)
-        with urlopen(request) as response:  # noqa: S310 - explicit admin URL target
-            raw_body = response.read()
-            if not raw_body:
-                return {}
-            decoded = raw_body.decode("utf-8")
-            if not decoded.strip():
-                return {}
-            return json.loads(decoded)
+        try:
+            with urlopen(request, timeout=30) as response:  # noqa: S310 - explicit admin URL target
+                raw_body = response.read()
+                if not raw_body:
+                    return {}
+                decoded = raw_body.decode("utf-8")
+                if not decoded.strip():
+                    return {}
+                return json.loads(decoded)
+        except HTTPError as exc:
+            with exc:
+                error_body = exc.read().decode("utf-8")
+            raise RuntimeError(
+                f"HTTP {exc.code} from {url}: {error_body}"
+            ) from exc
 
     def _request_empty(
         self,

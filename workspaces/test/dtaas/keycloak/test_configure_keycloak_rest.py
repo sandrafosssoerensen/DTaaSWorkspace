@@ -1,4 +1,5 @@
 """Unit tests for the Python Keycloak REST configurator."""
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
