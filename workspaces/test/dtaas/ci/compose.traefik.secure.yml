@@ -1,0 +1,132 @@
+# Self-contained CI compose for testing Traefik OAuth2 authorization over HTTP.
+#
+# Intended ONLY for GitHub Actions – do NOT use in production.
+#
+# Provides:
+#   - Dex OIDC provider (port 5556, plain HTTP)
+#   - Traefik reverse proxy (port 80)
+#   - traefik-forward-auth (OIDC, insecure cookie for HTTP)
+#   - user1 workspace (workspace:latest)
+#   - user2 workspace (mltooling/ml-workspace-minimal)
+#
+# Usage:
+#   docker compose -f workspaces/test/dtaas/ci/compose.traefik.secure.yml up -d
+#
+# The CI runner must add "127.0.0.1 dex" to /etc/hosts so that the OAuth
+# redirect from traefik-forward-auth (pointing at http://dex:5556/...) can be
+# followed by curl running on the host.
+
+name: workspace-ci
+
+services:
+
+  # ── Dex OIDC provider ──────────────────────────────────────────────────────
+  dex:
+    image: dexidp/dex:v2.41.1
+    restart: unless-stopped
+    command: ["dex", "serve", "/etc/dex/config.yml"]
+    volumes:
+      - ./config/dex.yml:/etc/dex/config.yml:ro
+    ports:
+      - "5556:5556"
+    networks:
+      - frontend
+      - users
+
+  # ── Traefik reverse proxy ──────────────────────────────────────────────────
+  traefik:
+    image: traefik:v3.6.4
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entryPoints.web.address=:80"
+      - "--entrypoints.web.forwardedHeaders.insecure=true"
+      - "--entrypoints.web.proxyProtocol.insecure=true"
+      - "--log.level=DEBUG"
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - frontend
+      - users
+
+  # ── traefik-forward-auth (OIDC via Dex) ───────────────────────────────────
+  # NOTE: thomseddon/traefik-forward-auth:2.2.0 has a bug where it fails to
+  # handle the /_oauth callback when the route is also protected by the
+  # traefik-forward-auth middleware itself ("self-middleware" issue). The
+  # fix-dont-require-self-middleware-test1 tag contains the fix for this.
+  # Track https://github.com/thomseddon/traefik-forward-auth/issues for a
+  # stable release containing this fix.
+  traefik-forward-auth:
+    image: thomseddon/traefik-forward-auth:latest
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=trace
+      - DEFAULT_PROVIDER=oidc
+      - PROVIDERS_OIDC_ISSUER_URL=http://dex:5556/dex
+      - PROVIDERS_OIDC_CLIENT_ID=traefik-forward-auth
+      - PROVIDERS_OIDC_CLIENT_SECRET=ci-test-client-secret
+      - SECRET=ci-test-hmac-secret-at-least-32-chars!!
+      - INSECURE_COOKIE=true
+      - CONFIG=/conf
+      - AUTH_HOST=localhost
+      - COOKIE_DOMAIN=localhost
+    volumes:
+      - ./config/conf:/conf
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.redirect.entryPoints=web"
+      - "traefik.http.routers.redirect.rule=Host(`localhost`) && PathPrefix(`/_oauth`)"
+      - "traefik.http.middlewares.traefik-forward-auth.forwardauth.address=http://traefik-forward-auth:4181"
+      - "traefik.http.middlewares.traefik-forward-auth.forwardauth.authResponseHeaders=X-Forwarded-User"
+      - "traefik.http.services.traefik-forward-auth.loadbalancer.server.port=4181"
+    depends_on:
+      - dex
+    networks:
+      - frontend
+      - users
+
+  # ── user1 workspace ────────────────────────────────────────────────────────
+  user1:
+    image: workspace:latest
+    restart: unless-stopped
+    environment:
+      - MAIN_USER=user1
+    volumes:
+      - ./files/user1:/workspace
+      - ./files/common:/workspace/common
+    shm_size: 512m
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.u1.entryPoints=web"
+      - "traefik.http.routers.u1.rule=Host(`localhost`) && PathPrefix(`/user1`)"
+      - "traefik.http.routers.u1.middlewares=traefik-forward-auth"
+    networks:
+      - users
+
+  # ── user2 workspace ────────────────────────────────────────────────────────
+  user2:
+    image: mltooling/ml-workspace-minimal:0.13.2
+    restart: unless-stopped
+    environment:
+      - AUTHENTICATE_VIA_JUPYTER=
+      - WORKSPACE_BASE_URL=user2
+    volumes:
+      - ./files/user2:/workspace
+      - ./files/common:/workspace/common
+    shm_size: "512m"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.u2.entryPoints=web"
+      - "traefik.http.routers.u2.rule=Host(`localhost`) && PathPrefix(`/user2`)"
+      - "traefik.http.routers.u2.middlewares=traefik-forward-auth"
+    networks:
+      - users
+
+networks:
+  frontend:
+    name: dtaas-ci-frontend
+  users:
+    name: dtaas-ci-users

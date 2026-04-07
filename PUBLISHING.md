@@ -71,22 +71,35 @@ repository's container registry.
 
 ## What Gets Published
 
-The workflow publishes the following image tags:
+The workflow publishes multi-platform Docker images supporting the following
+architectures:
+
+- **linux/amd64** - For Intel and AMD x86_64 processors
+- **linux/arm64** - For ARM64 processors (Apple Silicon, AWS Graviton, etc.)
+
+Each published image includes the following tags:
 
 - `latest` - Most recent successful build from the main branch
 - `main-<sha>` - Build from specific commit on main branch
 - `main` - Latest build from the main branch
 
+Docker will automatically select the appropriate architecture when pulling images.
+For example, `docker pull intocps/workspace:latest` will fetch the arm64 version
+on an Apple M1/M2/M3 Mac and the amd64 version on an Intel/AMD system.
+
 ## Image Testing
 
 After publishing, the workflow automatically:
 
-1. Pulls the published image from both registries
+1. Pulls the published multi-platform image from both registries
 2. Runs the complete Traefik integration test suite
 3. Validates that services start correctly
 4. Tests workspace routing through Traefik reverse proxy
 
 This ensures that published images are functional and match local builds.
+
+**Note**: The test suite currently runs on linux/amd64 runners. Both
+architectures are built, tested and published. The arm64 variant uses QEMU emulation during testing.
 
 ## Manual Publishing
 

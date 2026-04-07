@@ -52,13 +52,13 @@ docker build -t workspace:latest -f workspaces/Dockerfile.ubuntu.noble.gnome \
   ./workspaces
 ```
 
-## 📁Create Workspace Directories
+## 📁 Create Workspace Directories
 
 Create directory for storing workspace files.
 
 ```bash
 # create workspace directory if required
-cp -R workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/<USERAME1>
+cp -R workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/<USERNAME1>
 # set file permissions for use inside the container
 sudo chown -R 1000:100 workspaces/test/dtaas/files
 ```

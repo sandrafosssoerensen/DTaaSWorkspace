@@ -24,30 +24,39 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+
       - name: Set up Python
         uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548
         with:
           python-version: '3.12'
+
       - name: Install Poetry
         run: |
           curl -sSL https://install.python-poetry.org | python3 -
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+
       - name: Verify Poetry installation
         run: poetry --version
+
       - name: Configure Poetry
         run: |
           poetry config virtualenvs.in-project true
           poetry config virtualenvs.create true
+
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
+
       - name: Install project
         run: poetry install --no-interaction
+
       - name: Run pylint (min score 9.0)
         run: |
           poetry run pylint src/admin tests --rcfile=${GITHUB_WORKSPACE}/.pylintrc --fail-under=9.0
+
       - name: Run pytest with coverage
         run: |
           poetry run pytest --cov=admin --cov-report=xml --cov-report=term-missing
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@c23a129e932ebdcb56ca1565c68c6abdbf173769
         with:
@@ -55,8 +64,10 @@ jobs:
           flags: workspace-admin-tests
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
       - name: Build package
         run: poetry build
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:

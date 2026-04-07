@@ -48,7 +48,23 @@ The main changes made so far are listed here.
 
 ## Week of 20-Jan-2026
 
-### Changed
+* **Keycloak Integration**: Added Keycloak as the default identity provider for authentication
+  * Replaced GitLab OAuth with OIDC-based authentication
+  * New `keycloak` service in `compose.traefik.secure.yml`
+  * Updated `traefik-forward-auth` to use OIDC provider
+  * Added persistent volume for Keycloak data
+* **Environment Configuration**: Updated `.env.example` with Keycloak-specific variables
+  * Maintained backward compatibility with GitLab OAuth
+  * Added comprehensive comments for both authentication methods
+* **Documentation**: Created comprehensive setup and migration guides
+  * [KEYCLOAK_SETUP.md](KEYCLOAK_SETUP.md) - Detailed Keycloak configuration
+  * [KEYCLOAK_MIGRATION.md](KEYCLOAK_MIGRATION.md) - Migration guide from GitLab
+  * Updated [CONFIGURATION.md](CONFIGURATION.md) to reference Keycloak
+  * Updated [TRAEFIK_SECURE.md](TRAEFIK_SECURE.md) with Keycloak instructions
+* **Flexibility**: Designed for minimal changes when moving Keycloak external
+  * Environment variable based configuration
+  * Easy to switch between internal and external Keycloak
+  * Can still use GitLab OAuth with minor compose file modifications
 * Docker labels moved from build stage to deploy stage in Dockerfile
 
 ## Week of 13-Jan-2026
