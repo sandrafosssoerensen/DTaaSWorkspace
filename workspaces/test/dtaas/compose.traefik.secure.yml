@@ -65,7 +65,17 @@ services:
     restart: unless-stopped
     # Serve both the proxy (4455) and the decision API (4456).
     # Traefik ForwardAuth calls the decision API at http://oathkeeper:4456/decisions.
-    command: serve -c /etc/oathkeeper/config/oathkeeper.yml
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        sed \
+          -e 's|$${KEYCLOAK_JWKS_URL}|'"$$KEYCLOAK_JWKS_URL"'|g' \
+          -e 's|$${KEYCLOAK_ISSUER_URL}|'"$$KEYCLOAK_ISSUER_URL"'|g' \
+          -e 's|$${KEYCLOAK_TARGET_AUDIENCE}|'"$$KEYCLOAK_TARGET_AUDIENCE"'|g' \
+          /etc/oathkeeper/config/oathkeeper.yml > /tmp/oathkeeper.yml &&
+        oathkeeper serve -c /tmp/oathkeeper.yml
     volumes:
       - ./config/oathkeeper:/etc/oathkeeper/config
     environment:
