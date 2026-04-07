@@ -247,14 +247,14 @@ that enrich tokens with group membership and user profile information.
 Use the automation script to configure this idempotently against any Keycloak instance:
 
 ```bash
-# Shell script (Linux / macOS / WSL)
+# Python script (Linux / macOS / WSL)
 KEYCLOAK_BASE_URL=https://your-keycloak \
 KEYCLOAK_CONTEXT_PATH=/auth \
 KEYCLOAK_REALM=dtaas \
 KEYCLOAK_CLIENT_ID=dtaas-workspace \
 KEYCLOAK_ADMIN=admin \
 KEYCLOAK_ADMIN_PASSWORD=changeme \
-./scripts/keycloak/configure_keycloak_rest.sh
+python3 workspaces/test/dtaas/keycloak/configure_keycloak_rest.py
 ```
 
 The script creates (or reuses):

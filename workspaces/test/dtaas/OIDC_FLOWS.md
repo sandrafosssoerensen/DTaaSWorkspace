@@ -169,7 +169,8 @@ token type — the mapper flags control this.
 > excluded from the access token (`access.token.claim: false`).
 
 The same scope should be assigned to `dtaas-client` in Keycloak so the React
-SPA also receives group membership and profile claims.
+SPA also receives group membership claims and can obtain `profile` via the
+userinfo endpoint.
 
 ---
 

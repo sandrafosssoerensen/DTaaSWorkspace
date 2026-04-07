@@ -63,17 +63,14 @@ Example:
 docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env up -d
 ```
 
-If you use the compose-based Keycloak, the base URL is typically:
+If you use the compose-based Keycloak, set the variables as follows:
 
-```text
-http://localhost/auth
-```
+- `KEYCLOAK_BASE_URL` — the base origin only, **without** the context path:
+  - `http://localhost` (compose default, Keycloak at `/auth`)
+  - `https://<SERVER_DNS>` (TLS with DNS)
+- `KEYCLOAK_CONTEXT_PATH` — the path prefix Keycloak is mounted at (e.g. `/auth`)
 
-or, when running behind TLS and a configured DNS name:
-
-```text
-https://<SERVER_DNS>/auth
-```
+For example:
 
 ## Run the Python Script
 
