@@ -631,7 +631,10 @@ class KeycloakIntegrationTests(unittest.TestCase):
             "?q=dtaas-shared",
             token=token,
         )
-        scope = next((item for item in scopes if item.get("name") == "dtaas-shared"), None)
+        scope = next(
+            (item for item in scopes if item.get("name") == "dtaas-shared"),
+            None,
+        )
         self.assertIsNotNone(scope)
         scope_id = scope["id"]
 

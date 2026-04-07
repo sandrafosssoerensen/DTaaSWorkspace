@@ -155,16 +155,36 @@ class KeycloakRestConfigurator:
 
     def get_client_uuid(self, token: str) -> str:
         """Resolve the target client UUID from configured clientId."""
+        client_id = self.settings.keycloak_client_id
+        query = urlencode({"clientId": client_id})
         clients = self._request_json(
-            f"{self.admin_url}/{self.settings.keycloak_realm}/clients?max=200",
+            f"{self.admin_url}/{self.settings.keycloak_realm}/clients?{query}",
             token=token,
         )
         for client in clients:
-            if client.get("clientId") == self.settings.keycloak_client_id:
+            if client.get("clientId") == client_id:
                 client_uuid = client.get("id", "")
                 if client_uuid:
                     return client_uuid
-        raise RuntimeError(f"Client not found: {self.settings.keycloak_client_id}")
+        page_size = 200
+        first = 0
+        while True:
+            clients = self._request_json(
+                f"{self.admin_url}/{self.settings.keycloak_realm}/clients"
+                f"?first={first}&max={page_size}",
+                token=token,
+            )
+            if not clients:
+                break
+            for client in clients:
+                if client.get("clientId") == client_id:
+                    client_uuid = client.get("id", "")
+                    if client_uuid:
+                        return client_uuid
+            if len(clients) < page_size:
+                break
+            first += page_size
+        raise RuntimeError(f"Client not found: {client_id}")
 
     def get_or_create_scope_id(self, token: str) -> str:
         """Resolve shared scope ID, creating the scope when missing."""
@@ -252,7 +272,9 @@ class KeycloakRestConfigurator:
         profile["attributes"] = attributes
         self._request_empty(endpoint, method="PUT", json_data=profile, token=token)
 
-    def ensure_scope_assigned(self, token: str, client_uuid: str, scope_id: str) -> None:
+    def ensure_scope_assigned(
+        self, token: str, client_uuid: str, scope_id: str
+    ) -> None:
         """Ensure shared scope is assigned as a default scope on the client."""
         assigned = self._request_json(
             f"{self.admin_url}/{self.settings.keycloak_realm}/clients/{client_uuid}"
@@ -274,34 +296,41 @@ class KeycloakRestConfigurator:
         if not self.settings.profile_base_url:
             return
 
-        users = self._request_json(
-            f"{self.admin_url}/{self.settings.keycloak_realm}/users?max=200",
-            token=token,
-        )
-        for user in users:
-            user_id = user.get("id", "")
-            username = user.get("username", "")
-            if not user_id or not username:
-                continue
-
-            user_details = self._request_json(
-                f"{self.admin_url}/{self.settings.keycloak_realm}/users/{user_id}",
+        page_size = 200
+        first = 0
+        while True:
+            query = urlencode({"first": first, "max": page_size})
+            users = self._request_json(
+                f"{self.admin_url}/{self.settings.keycloak_realm}/users?{query}",
                 token=token,
             )
-            existing_attributes = user_details.get("attributes", {})
-            merged_attributes = dict(existing_attributes)
-            merged_attributes["profile"] = [
-                f"{self.settings.profile_base_url.rstrip('/')}/{username}"
-            ]
-
-            payload = dict(user_details)
-            payload["attributes"] = merged_attributes
-            self._request_empty(
-                f"{self.admin_url}/{self.settings.keycloak_realm}/users/{user_id}",
-                method="PUT",
-                json_data=payload,
-                token=token,
-            )
+            if not users:
+                break
+            for user in users:
+                user_id = user.get("id", "")
+                username = user.get("username", "")
+                if not user_id or not username:
+                    continue
+                user_details = self._request_json(
+                    f"{self.admin_url}/{self.settings.keycloak_realm}/users/{user_id}",
+                    token=token,
+                )
+                existing_attributes = user_details.get("attributes", {})
+                merged_attributes = dict(existing_attributes)
+                merged_attributes["profile"] = [
+                    f"{self.settings.profile_base_url.rstrip('/')}/{username}"
+                ]
+                payload = dict(user_details)
+                payload["attributes"] = merged_attributes
+                self._request_empty(
+                    f"{self.admin_url}/{self.settings.keycloak_realm}/users/{user_id}",
+                    method="PUT",
+                    json_data=payload,
+                    token=token,
+                )
+            if len(users) < page_size:
+                break
+            first += page_size
 
     def _request_json(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,

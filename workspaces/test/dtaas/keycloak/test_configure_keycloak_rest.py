@@ -203,7 +203,7 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
     def test_update_user_profiles_updates_valid_users(self) -> None:
         """Valid users get a profile URL; users with missing id or username are skipped."""
         self.config.settings = Settings(profile_base_url="https://localhost/gitlab")
-        users_url = f"{self.admin_url}/{self.realm}/users?max=200"
+        users_url = f"{self.admin_url}/{self.realm}/users?first=0&max=200"
         user_details_url = f"{self.admin_url}/{self.realm}/users/u-1"
         self.config.push(
             users_url,
