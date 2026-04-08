@@ -265,7 +265,7 @@ identity providers if they expose OIDC-compatible discovery/JWKS endpoints.
 1. Update `KEYCLOAK_JWKS_URL` and `KEYCLOAK_ISSUER_URL` in Oathkeeper environment.
 2. Ensure tokens include the expected audience (`KEYCLOAK_TARGET_AUDIENCE`).
 3. Keep the OPA policy contract stable (`preferred_username`, `groups`) or update
-  [config/oathkeeper/policy.rego](config/oathkeeper/policy.rego) accordingly.
+  [oathkeeper/policy.rego](oathkeeper/policy.rego) accordingly.
 
 ### Using External Keycloak
 

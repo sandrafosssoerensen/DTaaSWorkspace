@@ -33,7 +33,7 @@ Traefik  ──ForwardAuth──>  Oathkeeper (JWT validation)
 
 ## Configuration Files
 
-All files live in `workspaces/test/dtaas/config/oathkeeper/`:
+All files live in `workspaces/test/dtaas/oathkeeper/`:
 
 | File | Purpose |
 |---|---|

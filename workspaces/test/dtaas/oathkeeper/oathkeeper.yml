@@ -1,0 +1,85 @@
+# ORY Oathkeeper configuration for DTaaS workspace enforcement.
+# Traefik ForwardAuth calls the decision API at http://oathkeeper:4456/decisions.
+
+serve:
+  proxy:
+    port: 4455
+    host: "0.0.0.0"
+  api:
+    port: 4456
+    host: "0.0.0.0"
+
+access_rules:
+  matching_strategy: regexp
+  repositories:
+    - file:///etc/oathkeeper/config/access-rules.yml
+
+log:
+  level: info
+  format: json
+
+errors:
+  fallback:
+    - json
+  handlers:
+    json:
+      enabled: true
+      config:
+        verbose: true
+
+authenticators:
+  noop:
+    enabled: true
+
+  jwt:
+    enabled: true
+    config:
+      jwks_urls:
+        - ${KEYCLOAK_JWKS_URL}
+      trusted_issuers:
+        - ${KEYCLOAK_ISSUER_URL}
+      allowed_algorithms:
+        - RS256
+        - RS384
+        - RS512
+      token_from:
+        header: Authorization
+      scope_strategy: none
+      target_audience:
+        - ${KEYCLOAK_TARGET_AUDIENCE}
+
+authorizers:
+  allow:
+    enabled: true
+
+  remote_json:
+    enabled: true
+    config:
+      remote: http://opa:8181/v1/data/workspace/authz/allow
+      payload: |
+        {
+          "input": {
+            "subject": "{{ .Subject }}",
+            "extra": {{ .Extra | toJson }},
+            "url": {{ .MatchContext.URL | toJson }},
+            "method": "{{ .MatchContext.Method }}"
+          }
+        }
+      forward_response_headers_to_upstream: []
+      retry:
+        give_up_after: 1s
+        max_delay: 100ms
+
+  deny:
+    enabled: true
+
+mutators:
+  noop:
+    enabled: true
+
+  header:
+    enabled: true
+    config:
+      headers:
+        X-User-Name: "{{ print .Extra.preferred_username }}"
+        X-User-Subject: "{{ .Subject }}"

@@ -1,0 +1,34 @@
+# DTaaS Oathkeeper access rules.
+
+- id: dtaas-workspace-jwt-enforcement
+  version: "v0.36.0-beta.1"
+  description: >
+    Requires a valid Keycloak-issued JWT and enforces per-user path authorization
+    via OPA policy checks.
+  match:
+    url: "^https?://[^/]+/.+$"
+    methods:
+      - GET
+      - HEAD
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+  authenticators:
+    - handler: jwt
+  authorizer:
+    handler: remote_json
+    config:
+      remote: http://opa:8181/v1/data/workspace/authz/allow
+      payload: |
+        {
+          "input": {
+            "subject": "{{ .Subject }}",
+            "extra": {{ .Extra | toJson }},
+            "url": {{ .MatchContext.URL | toJson }},
+            "method": "{{ .MatchContext.Method }}"
+          }
+        }
+  mutators:
+    - handler: header

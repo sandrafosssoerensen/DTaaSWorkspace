@@ -213,7 +213,7 @@ USERNAME3=user3 # <--- replace "user3" with your desired username
 ```
 
 Ensure your OPA policy allows the new user's path prefix. The default policy in
-[`policy.rego`](./config/oathkeeper/policy.rego) already authorizes access when
+[`policy.rego`](./oathkeeper/policy.rego) already authorizes access when
 the first URL segment matches `preferred_username` and the user is in `dtaas`.
 
 Don't forget to create the user's directory:

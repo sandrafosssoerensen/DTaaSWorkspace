@@ -77,7 +77,7 @@ services:
           /etc/oathkeeper/config/oathkeeper.yml > /tmp/oathkeeper.yml &&
         oathkeeper serve -c /tmp/oathkeeper.yml
     volumes:
-      - ./config/oathkeeper:/etc/oathkeeper/config
+      - ./oathkeeper:/etc/oathkeeper/config
     environment:
       # Internal Keycloak JWKS URL (container-to-container, always HTTP).
       # Oathkeeper fetches public signing keys here to verify JWT signatures.
@@ -115,7 +115,7 @@ services:
       - --addr=0.0.0.0:8181
       - /policies/policy.rego
     volumes:
-      - ./config/oathkeeper/policy.rego:/policies/policy.rego
+      - ./oathkeeper/policy.rego:/policies/policy.rego
     networks:
       - users
 
