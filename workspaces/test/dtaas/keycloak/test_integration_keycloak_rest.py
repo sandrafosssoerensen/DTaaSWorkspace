@@ -7,6 +7,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 import uuid
@@ -570,26 +571,38 @@ class KeycloakIntegrationTests(unittest.TestCase):
         Two users are exercised, one with a pre-seeded profile attribute.
         """
         # pylint: disable=too-many-locals
-        env = os.environ.copy()
-        env.update(
-            {
-                "KEYCLOAK_BASE_URL": self.base_url,
-                "KEYCLOAK_CONTEXT_PATH": "/",
-                "KEYCLOAK_REALM": self.realm,
-                "KEYCLOAK_CLIENT_ID": self.target_client_id,
-                "KEYCLOAK_ADMIN_CLIENT_ID": self.admin_client_id,
-                "KEYCLOAK_ADMIN_CLIENT_SECRET": self.admin_client_secret,
-            }
+        env_content = (
+            f"KEYCLOAK_BASE_URL={self.base_url}\n"
+            f"KEYCLOAK_CONTEXT_PATH=/\n"
+            f"KEYCLOAK_REALM={self.realm}\n"
+            f"KEYCLOAK_CLIENT_ID={self.target_client_id}\n"
+            f"KEYCLOAK_ADMIN_CLIENT_ID={self.admin_client_id}\n"
+            f"KEYCLOAK_ADMIN_CLIENT_SECRET={self.admin_client_secret}\n"
+            f"KEYCLOAK_PROFILE_BASE_URL=https://localhost\n"
+            f"KEYCLOAK_USER_PROFILES=[\"test_user_1\"]\n"
         )
 
-        result = subprocess.run(
-            [sys.executable, "workspaces/test/dtaas/keycloak/configure_keycloak_rest.py"],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".env", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(env_content)
+            env_file = f.name
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "workspaces/test/dtaas/keycloak/configure_keycloak_rest.py",
+                    "--env-file",
+                    env_file,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+        finally:
+            os.unlink(env_file)
 
         token = admin_token(self.base_url, self.admin_user, self.admin_password)
 

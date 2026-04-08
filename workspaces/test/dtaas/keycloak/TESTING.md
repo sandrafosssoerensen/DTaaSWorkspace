@@ -67,10 +67,24 @@ If you use the compose-based Keycloak, set the variables as follows:
 
 ## Run the Python Script
 
-From the repository root, set the required environment variables and run the
-script.
+From the repository root, load configuration from `.env` file and run the script:
 
-### Default: mappers placed directly on the client
+### Command to run (with --env-file)
+
+```powershell
+cd workspaces/test/dtaas/keycloak
+python configure_keycloak_rest.py --env-file ../config/.env
+```
+
+Or from the repository root:
+
+```powershell
+python workspaces/test/dtaas/keycloak/configure_keycloak_rest.py --env-file workspaces/test/dtaas/config/.env
+```
+
+### Alternative: Direct environment variables (legacy)
+
+If you prefer to set environment variables directly instead of using an .env file:
 
 ```powershell
 $env:KEYCLOAK_BASE_URL = "http://localhost:18080"
@@ -79,43 +93,6 @@ $env:KEYCLOAK_REALM = "dtaas"
 $env:KEYCLOAK_CLIENT_ID = "dtaas-workspace"
 $env:KEYCLOAK_ADMIN = "admin"
 $env:KEYCLOAK_ADMIN_PASSWORD = "admin"
-
-python workspaces/test/dtaas/keycloak/configure_keycloak_rest.py
-```
-
-Expected success output:
-
-```text
-Keycloak client mappers configured successfully (REST API).
-```
-
-### Optional: mappers placed on a shared client scope
-
-Set `KEYCLOAK_USE_SHARED_SCOPE=true` and provide the scope name. The scope is
-created if it does not already exist.
-
-```powershell
-$env:KEYCLOAK_USE_SHARED_SCOPE = "true"
-$env:KEYCLOAK_SHARED_SCOPE_NAME = "dtaas-shared"
-
-python workspaces/test/dtaas/keycloak/configure_keycloak_rest.py
-```
-
-Expected success output:
-
-```text
-Keycloak shared scope and mappers configured successfully (REST API).
-```
-
-### Example for a Keycloak instance exposed at `/auth`
-
-```powershell
-$env:KEYCLOAK_BASE_URL = "https://foo.com"
-$env:KEYCLOAK_CONTEXT_PATH = "/auth"
-$env:KEYCLOAK_REALM = "dtaas"
-$env:KEYCLOAK_CLIENT_ID = "dtaas-workspace"
-$env:KEYCLOAK_ADMIN = "admin"
-$env:KEYCLOAK_ADMIN_PASSWORD = "changeme"
 
 python workspaces/test/dtaas/keycloak/configure_keycloak_rest.py
 ```
