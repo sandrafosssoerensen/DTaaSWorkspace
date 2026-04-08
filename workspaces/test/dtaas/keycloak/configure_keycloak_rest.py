@@ -46,7 +46,7 @@ MAPPERS: list[dict[str, Any]] = [
             "userinfo.token.claim": "true",
             "multivalued": "true",
         },
-    },
+    }
 ]
 
 PAGE_SIZE = 200
@@ -221,6 +221,7 @@ class KeycloakRestConfigurator:
 
         expected = {
             "profile": "Profile URL",
+            "test_claim": "Test Claim for Validation",
         }
 
         by_name = {attr.get("name"): attr for attr in attributes if attr.get("name")}
@@ -263,9 +264,6 @@ class KeycloakRestConfigurator:
 
     def update_user_profiles(self, token: str) -> None:
         """Merge and update each user's profile attribute URL."""
-        if not self.settings.profile_base_url:
-            return
-
         first = 0
         while True:
             query = urlencode({"first": first, "max": PAGE_SIZE})
@@ -291,6 +289,7 @@ class KeycloakRestConfigurator:
                 merged_attributes["profile"] = [
                     f"{self.settings.profile_base_url.rstrip('/')}/{username}"
                 ]
+                merged_attributes["test_claim"] = ["test_value_for_" + username]
 
                 payload = dict(user_details)
                 payload["attributes"] = merged_attributes
@@ -403,7 +402,10 @@ def settings_from_env() -> Settings:
         keycloak_admin_client_secret=os.getenv("KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
         keycloak_admin=os.getenv("KEYCLOAK_ADMIN", "admin"),
         keycloak_admin_password=os.getenv("KEYCLOAK_ADMIN_PASSWORD", "admin"),
-        profile_base_url=os.getenv("KEYCLOAK_PROFILE_BASE_URL", os.getenv("PROFILE_BASE_URL", "")),
+        profile_base_url=os.getenv(
+            "KEYCLOAK_PROFILE_BASE_URL",
+            os.getenv("PROFILE_BASE_URL", os.getenv("KEYCLOAK_BASE_URL", "http://localhost")),
+        ),
     )
 
 
