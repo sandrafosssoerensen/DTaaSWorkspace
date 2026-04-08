@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-REQUIRED_MAPPERS = {"profile", "groups", "groups_owner", "sub_legacy"}
+REQUIRED_MAPPERS = {"profile"}
 
 
 def find_free_port() -> int:
@@ -116,23 +116,26 @@ def create_user(
     token: str,
     realm: str,
     username: str,
-    attributes: dict | None = None,
+    attributes: dict[str, list[str]] | None = None,
 ) -> str:
-    """Create a test user, optionally with pre-existing custom attributes."""
+    """Create a test user."""
+    payload: dict[str, Any] = {
+        "username": username,
+        "email": f"{username}@test.local",
+        "firstName": "Test",
+        "lastName": "User",
+        "enabled": True,
+        "emailVerified": True,
+        "requiredActions": [],
+    }
+    if attributes:
+        payload["attributes"] = attributes
+
     http_json(
         f"{base_url}/admin/realms/{realm}/users",
         method="POST",
         token=token,
-        data={
-            "username": username,
-            "email": f"{username}@test.local",
-            "firstName": "Test",
-            "lastName": "User",
-            "enabled": True,
-            "emailVerified": True,
-            "requiredActions": [],
-            **(({"attributes": attributes}) if attributes else {}),
-        },
+        data=payload,
     )
     users = http_json(
         f"{base_url}/admin/realms/{realm}/users?username={username}", token=token
@@ -216,27 +219,6 @@ def userinfo(base_url: str, realm: str, access_token: str) -> dict[str, Any]:
         token=access_token,
     )
     return payload if isinstance(payload, dict) else {}
-
-
-def claim_value(claims: dict[str, Any], claim_name: str) -> Any:
-    """Read a claim using flat lookup then Keycloak-style dot-split nesting.
-
-    Keycloak's oidc mappers split claim names on '.' to build nested objects,
-    so 'https://gitlab.org/claims/groups/owner' appears in the JWT as
-    {"https://gitlab": {"org/claims/groups/owner": value}}.
-    """
-    if claim_name in claims:
-        return claims[claim_name]
-    # Traverse the dot-split path that Keycloak creates
-    parts = claim_name.split(".")
-    if len(parts) > 1:
-        current: Any = claims
-        for part in parts:
-            if not isinstance(current, dict):
-                return None
-            current = current.get(part)
-        return current
-    return None
 
 
 def resolve_client_uuid(base_url: str, token: str, realm: str, client_id: str) -> str:
@@ -459,24 +441,22 @@ class KeycloakIntegrationTests(unittest.TestCase):
             )
             create_realm(cls.base_url, token, cls.realm)
             create_client(cls.base_url, token, cls.realm, cls.target_client_id)
-            # User with pre-existing custom attribute (merge-safety case)
             user_id = create_user(
-                cls.base_url, token, cls.realm, cls.username,
-                attributes={"department": ["eng"]},
+                cls.base_url,
+                token,
+                cls.realm,
+                cls.username,
+                attributes={"profile": [f"https://localhost/{cls.username}"]},
             )
             set_user_password(
                 cls.base_url, token, cls.realm, user_id, cls.user_password,
             )
-            group_id = ensure_group(cls.base_url, token, cls.realm, cls.group_name)
-            add_user_to_group(cls.base_url, token, cls.realm, user_id, group_id)
-            # User with no prior custom attributes
             clean_user_id = create_user(
                 cls.base_url, token, cls.realm, cls.clean_username,
             )
             set_user_password(
                 cls.base_url, token, cls.realm, clean_user_id, cls.clean_user_password,
             )
-            add_user_to_group(cls.base_url, token, cls.realm, clean_user_id, group_id)
             _, cls.admin_client_secret = create_admin_service_account_client(
                 cls.base_url, token, cls.admin_client_id
             )
@@ -585,23 +565,9 @@ class KeycloakIntegrationTests(unittest.TestCase):
     def test_script_configures_claims_via_service_account(self) -> None:
         """Validate end-to-end claims setup via service-account auth path.
 
-        Two users are exercised:
-        - A user with a pre-existing custom attribute (department) that must
-          survive the script run unchanged (merge-safety).
-        - A user with no prior custom attributes who should receive profile.
+        Two users are exercised, one with a pre-seeded profile attribute.
         """
         # pylint: disable=too-many-locals
-        token = admin_token(self.base_url, self.admin_user, self.admin_password)
-        users_before = http_json(
-            f"{self.base_url}/admin/realms/{self.realm}/users?username={self.username}",
-            token=token,
-        )
-        user_id_before = users_before[0]["id"]
-        attrs_before = http_json(
-            f"{self.base_url}/admin/realms/{self.realm}/users/{user_id_before}",
-            token=token,
-        ).get("attributes", {})
-
         env = os.environ.copy()
         env.update(
             {
@@ -611,7 +577,6 @@ class KeycloakIntegrationTests(unittest.TestCase):
                 "KEYCLOAK_CLIENT_ID": self.target_client_id,
                 "KEYCLOAK_ADMIN_CLIENT_ID": self.admin_client_id,
                 "KEYCLOAK_ADMIN_CLIENT_SECRET": self.admin_client_secret,
-                "PROFILE_BASE_URL": "https://localhost/gitlab",
             }
         )
 
@@ -626,26 +591,6 @@ class KeycloakIntegrationTests(unittest.TestCase):
 
         token = admin_token(self.base_url, self.admin_user, self.admin_password)
 
-        scopes = http_json(
-            f"{self.base_url}/admin/realms/{self.realm}/client-scopes"
-            "?q=dtaas-shared",
-            token=token,
-        )
-        scope = next(
-            (item for item in scopes if item.get("name") == "dtaas-shared"),
-            None,
-        )
-        self.assertIsNotNone(scope)
-        scope_id = scope["id"]
-
-        mappers = http_json(
-            f"{self.base_url}/admin/realms/{self.realm}/client-scopes/{scope_id}"
-            "/protocol-mappers/models",
-            token=token,
-        )
-        names = {mapper["name"] for mapper in mappers}
-        self.assertTrue(REQUIRED_MAPPERS.issubset(names))
-
         clients = http_json(
             f"{self.base_url}/admin/realms/{self.realm}/clients"
             f"?clientId={self.target_client_id}",
@@ -653,45 +598,13 @@ class KeycloakIntegrationTests(unittest.TestCase):
         )
         client_uuid = clients[0]["id"]
 
-        defaults = http_json(
+        mappers = http_json(
             f"{self.base_url}/admin/realms/{self.realm}/clients/{client_uuid}"
-            "/default-client-scopes",
+            "/protocol-mappers/models",
             token=token,
         )
-        self.assertIn(scope_id, {item["id"] for item in defaults})
-
-        # --- User with pre-existing attribute: profile set, department preserved ---
-        users = http_json(
-            f"{self.base_url}/admin/realms/{self.realm}/users?username={self.username}",
-            token=token,
-        )
-        user_id = users[0]["id"]
-        user_details = http_json(
-            f"{self.base_url}/admin/realms/{self.realm}/users/{user_id}", token=token
-        )
-        attributes = user_details.get("attributes", {})
-        for key, value in attrs_before.items():
-            if key != "profile":
-                self.assertEqual(attributes.get(key), value)
-        self.assertEqual(
-            attributes.get("profile"), [f"https://localhost/gitlab/{self.username}"]
-        )
-
-        # --- User with no prior custom attributes: profile set from scratch ---
-        clean_users = http_json(
-            f"{self.base_url}/admin/realms/{self.realm}/users"
-            f"?username={self.clean_username}",
-            token=token,
-        )
-        clean_user_details = http_json(
-            f"{self.base_url}/admin/realms/{self.realm}/users/{clean_users[0]['id']}",
-            token=token,
-        )
-        clean_attrs = clean_user_details.get("attributes", {})
-        self.assertEqual(
-            clean_attrs.get("profile"),
-            [f"https://localhost/gitlab/{self.clean_username}"],
-        )
+        names = {mapper["name"] for mapper in mappers}
+        self.assertTrue(REQUIRED_MAPPERS.issubset(names))
 
         access_token = user_token(
             self.base_url,
@@ -705,16 +618,12 @@ class KeycloakIntegrationTests(unittest.TestCase):
         decoded = json.loads(base64.urlsafe_b64decode(token_payload).decode("utf-8"))
 
         self.assertEqual(decoded.get("preferred_username"), self.username)
-        self.assertIn(self.group_name, decoded.get("groups", []))
-        owners_claim = claim_value(decoded, "https://gitlab.org/claims/groups/owner")
-        self.assertIn(self.group_name, owners_claim or [])
 
         user_info = userinfo(self.base_url, self.realm, access_token)
         self.assertEqual(
-            user_info.get("profile"), f"https://localhost/gitlab/{self.username}"
+            user_info.get("profile"), f"https://localhost/{self.username}"
         )
         self.assertEqual(user_info.get("preferred_username"), self.username)
-        self.assertIn(self.group_name, user_info.get("groups", []))
 
 
 if __name__ == "__main__":

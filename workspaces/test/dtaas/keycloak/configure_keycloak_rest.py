@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Configure DTaaS Keycloak shared scope and mappers via Admin REST API.
-
-This module mirrors the shell-based REST script behavior using Python only.
-"""
+"""Configure DTaaS Keycloak shared scope and mappers via Admin REST API."""
 # pylint: disable=duplicate-code
 
 # Only using Python's standard library
@@ -33,50 +30,9 @@ MAPPERS: list[dict[str, Any]] = [
             "userinfo.token.claim": "true",
         },
     },
-    {
-        "name": "groups",
-        "protocol": "openid-connect",
-        "protocolMapper": "oidc-group-membership-mapper",
-        "consentRequired": False,
-        "config": {
-            "full.path": "false",
-            "id.token.claim": "false",
-            "access.token.claim": "true",
-            "claim.name": "groups",
-            "userinfo.token.claim": "true",
-            "multivalued": "true",
-        },
-    },
-    {
-        "name": "groups_owner",
-        "protocol": "openid-connect",
-        "protocolMapper": "oidc-group-membership-mapper",
-        "consentRequired": False,
-        "config": {
-            "full.path": "false",
-            "id.token.claim": "false",
-            "access.token.claim": "true",
-            "claim.name": "https://gitlab.org/claims/groups/owner",
-            "userinfo.token.claim": "true",
-            "multivalued": "true",
-        },
-    },
-    {
-        "name": "sub_legacy",
-        "protocol": "openid-connect",
-        "protocolMapper": "oidc-usermodel-attribute-mapper",
-        "consentRequired": False,
-        "config": {
-            "user.attribute": "sub_legacy",
-            "claim.name": "sub_legacy",
-            "jsonType.label": "String",
-            "id.token.claim": "false",
-            "access.token.claim": "false",
-            "userinfo.token.claim": "true",
-        },
-    },
 ]
 
+PAGE_SIZE = 200
 
 @dataclass(frozen=True)
 class Settings:  # pylint: disable=too-many-instance-attributes
@@ -86,12 +42,12 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     keycloak_context_path: str = "/auth"
     keycloak_realm: str = "dtaas"
     keycloak_client_id: str = "dtaas-workspace"
-    keycloak_shared_scope_name: str = "dtaas-shared"
+    keycloak_shared_scope_name: str = ""
     keycloak_admin_client_id: str = ""
     keycloak_admin_client_secret: str = ""
     keycloak_admin: str = "admin"
     keycloak_admin_password: str = "admin"
-    profile_base_url: str = ""
+    use_shared_scope: bool = False
 
 
 def normalize_path(path: str) -> str:
@@ -115,15 +71,40 @@ class KeycloakRestConfigurator:
         """Run the full claims-configuration workflow."""
         token = self.get_access_token()
         client_uuid = self.get_client_uuid(token)
-        scope_id = self.get_or_create_scope_id(token)
 
-        for mapper in MAPPERS:
-            self.ensure_mapper(token, scope_id, mapper)
+        if self.settings.use_shared_scope:
+            if not self.settings.keycloak_shared_scope_name:
+                raise RuntimeError(
+                    "KEYCLOAK_SHARED_SCOPE_NAME must be set when "
+                    "KEYCLOAK_USE_SHARED_SCOPE is enabled"
+                )
+            scope_id = self.get_or_create_scope_id(token)
+            for mapper in MAPPERS:
+                self.ensure_mapper(token, scope_id, mapper)
+            self.ensure_scope_assigned(token, client_uuid, scope_id)
+        else:
+            for mapper in MAPPERS:
+                self.ensure_mapper_on_client(token, client_uuid, mapper)
 
-        self.ensure_user_profile_attribute(token, "profile", "Profile URL")
-        self.ensure_user_profile_attribute(token, "sub_legacy", "Legacy Subject")
-        self.ensure_scope_assigned(token, client_uuid, scope_id)
-        self.update_user_profiles(token)
+    @staticmethod
+    def _find_client_uuid(clients: list[dict[str, Any]], client_id: str) -> str:
+        """Return matching client UUID from a list response, if present."""
+        for client in clients:
+            if client.get("clientId") == client_id:
+                return client.get("id", "")
+        return ""
+
+    def _get_scope_id(self, token: str, scope_name: str) -> str:
+        """Lookup shared scope by name and return its id when found."""
+        scopes = self._request_json(
+            f"{self.admin_url}/{self.settings.keycloak_realm}/client-scopes"
+            f"?q={scope_name}",
+            token=token,
+        )
+        for scope in scopes:
+            if scope.get("name") == scope_name and scope.get("id"):
+                return scope["id"]
+        return ""
 
     def get_access_token(self) -> str:
         """Get an admin token using service account or username/password."""
@@ -161,42 +142,38 @@ class KeycloakRestConfigurator:
             f"{self.admin_url}/{self.settings.keycloak_realm}/clients?{query}",
             token=token,
         )
-        for client in clients:
-            if client.get("clientId") == client_id:
-                client_uuid = client.get("id", "")
-                if client_uuid:
-                    return client_uuid
-        page_size = 200
+
+        client_uuid = self._find_client_uuid(clients, client_id)
+        if client_uuid:
+            return client_uuid
+
         first = 0
         while True:
             clients = self._request_json(
                 f"{self.admin_url}/{self.settings.keycloak_realm}/clients"
-                f"?first={first}&max={page_size}",
+                f"?first={first}&max={PAGE_SIZE}",
                 token=token,
             )
             if not clients:
                 break
-            for client in clients:
-                if client.get("clientId") == client_id:
-                    client_uuid = client.get("id", "")
-                    if client_uuid:
-                        return client_uuid
-            if len(clients) < page_size:
+
+            client_uuid = self._find_client_uuid(clients, client_id)
+            if client_uuid:
+                return client_uuid
+
+            if len(clients) < PAGE_SIZE:
                 break
-            first += page_size
+            first += PAGE_SIZE
+
         raise RuntimeError(f"Client not found: {client_id}")
 
     def get_or_create_scope_id(self, token: str) -> str:
         """Resolve shared scope ID, creating the scope when missing."""
         scope_name = self.settings.keycloak_shared_scope_name
-        scopes = self._request_json(
-            f"{self.admin_url}/{self.settings.keycloak_realm}/client-scopes"
-            f"?q={scope_name}",
-            token=token,
-        )
-        for scope in scopes:
-            if scope.get("name") == scope_name and scope.get("id"):
-                return scope["id"]
+
+        scope_id = self._get_scope_id(token, scope_name)
+        if scope_id:
+            return scope_id
 
         self._request_empty(
             f"{self.admin_url}/{self.settings.keycloak_realm}/client-scopes",
@@ -205,14 +182,10 @@ class KeycloakRestConfigurator:
             token=token,
         )
 
-        scopes = self._request_json(
-            f"{self.admin_url}/{self.settings.keycloak_realm}/client-scopes"
-            f"?q={scope_name}",
-            token=token,
-        )
-        for scope in scopes:
-            if scope.get("name") == scope_name and scope.get("id"):
-                return scope["id"]
+        scope_id = self._get_scope_id(token, scope_name)
+        if scope_id:
+            return scope_id
+
         raise RuntimeError(f"Failed to resolve shared scope: {scope_name}")
 
     def ensure_mapper(self, token: str, scope_id: str, mapper: dict[str, Any]) -> None:
@@ -241,36 +214,33 @@ class KeycloakRestConfigurator:
 
         self._request_empty(endpoint, method="POST", json_data=mapper, token=token)
 
-    def ensure_user_profile_attribute(
-        self, token: str, attr_name: str, display_name: str
+    def ensure_mapper_on_client(
+        self, token: str, client_uuid: str, mapper: dict[str, Any]
     ) -> None:
-        """Ensure a realm user-profile attribute exists with expected settings."""
-        endpoint = f"{self.admin_url}/{self.settings.keycloak_realm}/users/profile"
-        profile = self._request_json(endpoint, token=token)
-        attributes = profile.get("attributes", [])
-
-        found = False
-        for attr in attributes:
-            if attr.get("name") == attr_name:
-                attr["displayName"] = display_name
-                attr["permissions"] = {"view": ["admin"], "edit": ["admin"]}
-                attr["multivalued"] = False
-                attr.pop("required", None)
-                found = True
+        """Upsert mapper by name directly on the client."""
+        endpoint = (
+            f"{self.admin_url}/{self.settings.keycloak_realm}/clients/{client_uuid}"
+            "/protocol-mappers/models"
+        )
+        existing = self._request_json(endpoint, token=token)
+        existing_id = ""
+        for item in existing:
+            if item.get("name") == mapper["name"] and item.get("id"):
+                existing_id = item["id"]
                 break
 
-        if not found:
-            attributes.append(
-                {
-                    "name": attr_name,
-                    "displayName": display_name,
-                    "permissions": {"view": ["admin"], "edit": ["admin"]},
-                    "multivalued": False,
-                }
+        if existing_id:
+            updated = dict(mapper)
+            updated["id"] = existing_id
+            self._request_empty(
+                f"{endpoint}/{existing_id}",
+                method="PUT",
+                json_data=updated,
+                token=token,
             )
+            return
 
-        profile["attributes"] = attributes
-        self._request_empty(endpoint, method="PUT", json_data=profile, token=token)
+        self._request_empty(endpoint, method="POST", json_data=mapper, token=token)
 
     def ensure_scope_assigned(
         self, token: str, client_uuid: str, scope_id: str
@@ -290,47 +260,6 @@ class KeycloakRestConfigurator:
             method="PUT",
             token=token,
         )
-
-    def update_user_profiles(self, token: str) -> None:
-        """Merge and update each user's profile attribute URL."""
-        if not self.settings.profile_base_url:
-            return
-
-        page_size = 200
-        first = 0
-        while True:
-            query = urlencode({"first": first, "max": page_size})
-            users = self._request_json(
-                f"{self.admin_url}/{self.settings.keycloak_realm}/users?{query}",
-                token=token,
-            )
-            if not users:
-                break
-            for user in users:
-                user_id = user.get("id", "")
-                username = user.get("username", "")
-                if not user_id or not username:
-                    continue
-                user_details = self._request_json(
-                    f"{self.admin_url}/{self.settings.keycloak_realm}/users/{user_id}",
-                    token=token,
-                )
-                existing_attributes = user_details.get("attributes", {})
-                merged_attributes = dict(existing_attributes)
-                merged_attributes["profile"] = [
-                    f"{self.settings.profile_base_url.rstrip('/')}/{username}"
-                ]
-                payload = dict(user_details)
-                payload["attributes"] = merged_attributes
-                self._request_empty(
-                    f"{self.admin_url}/{self.settings.keycloak_realm}/users/{user_id}",
-                    method="PUT",
-                    json_data=payload,
-                    token=token,
-                )
-            if len(users) < page_size:
-                break
-            first += page_size
 
     def _request_json(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
@@ -396,16 +325,13 @@ def settings_from_env() -> Settings:
         keycloak_context_path=os.getenv("KEYCLOAK_CONTEXT_PATH", "/auth"),
         keycloak_realm=os.getenv("KEYCLOAK_REALM", "dtaas"),
         keycloak_client_id=os.getenv("KEYCLOAK_CLIENT_ID", "dtaas-workspace"),
-        keycloak_shared_scope_name=os.getenv(
-            "KEYCLOAK_SHARED_SCOPE_NAME", "dtaas-shared"
-        ),
+        keycloak_shared_scope_name=os.getenv("KEYCLOAK_SHARED_SCOPE_NAME", ""),
         keycloak_admin_client_id=os.getenv("KEYCLOAK_ADMIN_CLIENT_ID", ""),
         keycloak_admin_client_secret=os.getenv("KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
         keycloak_admin=os.getenv("KEYCLOAK_ADMIN", "admin"),
         keycloak_admin_password=os.getenv("KEYCLOAK_ADMIN_PASSWORD", "admin"),
-        profile_base_url=os.getenv(
-            "PROFILE_BASE_URL", ""
-        ),
+        use_shared_scope=os.getenv("KEYCLOAK_USE_SHARED_SCOPE", "").lower()
+        in ("1", "true", "yes"),
     )
 
 
@@ -418,7 +344,10 @@ def main() -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print("Keycloak shared scope and mappers configured successfully (REST API).")
+    if configurator.settings.use_shared_scope:
+        print("Keycloak shared scope and mappers configured successfully (REST API).")
+    else:
+        print("Keycloak client mappers configured successfully (REST API).")
     return 0
 
 
