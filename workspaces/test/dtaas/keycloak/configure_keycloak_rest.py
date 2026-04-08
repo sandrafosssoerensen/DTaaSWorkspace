@@ -221,7 +221,6 @@ class KeycloakRestConfigurator:
 
         expected = {
             "profile": "Profile URL",
-            "test_claim": "Test Claim for Validation",
         }
 
         by_name = {attr.get("name"): attr for attr in attributes if attr.get("name")}
@@ -289,7 +288,6 @@ class KeycloakRestConfigurator:
                 merged_attributes["profile"] = [
                     f"{self.settings.profile_base_url.rstrip('/')}/{username}"
                 ]
-                merged_attributes["test_claim"] = ["test_value_for_" + username]
 
                 payload = dict(user_details)
                 payload["attributes"] = merged_attributes
