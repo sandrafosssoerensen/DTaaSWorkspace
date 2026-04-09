@@ -6,7 +6,7 @@
     Requires a valid Keycloak-issued JWT and enforces per-user path authorization
     via OPA policy checks.
   match:
-    url: "^https?://[^/]+/.+$"
+    url: "<.*>"
     methods:
       - GET
       - HEAD

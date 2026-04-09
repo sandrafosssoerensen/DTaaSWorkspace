@@ -5,13 +5,7 @@ import future.keywords.if
 default allow := false
 
 allow if {
-    user_in_dtaas_group
     path_matches_username
-}
-
-user_in_dtaas_group if {
-    groups := input.extra.groups
-    groups[_] == "dtaas"
 }
 
 path_matches_username if {

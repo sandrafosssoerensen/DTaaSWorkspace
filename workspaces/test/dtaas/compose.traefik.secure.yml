@@ -75,17 +75,23 @@ services:
           -e 's|$${KEYCLOAK_ISSUER_URL}|'"$$KEYCLOAK_ISSUER_URL"'|g' \
           -e 's|$${KEYCLOAK_TARGET_AUDIENCE}|'"$$KEYCLOAK_TARGET_AUDIENCE"'|g' \
           /etc/oathkeeper/config/oathkeeper.yml > /tmp/oathkeeper.yml &&
+        sed \
+          -e 's|$${KEYCLOAK_JWKS_URL}|'"$$KEYCLOAK_JWKS_URL"'|g' \
+          -e 's|$${KEYCLOAK_ISSUER_URL}|'"$$KEYCLOAK_ISSUER_URL"'|g' \
+          -e 's|$${KEYCLOAK_TARGET_AUDIENCE}|'"$$KEYCLOAK_TARGET_AUDIENCE"'|g' \
+          /etc/oathkeeper/config/access-rules.yml > /tmp/access-rules.yml &&
         oathkeeper serve -c /tmp/oathkeeper.yml
     volumes:
       - ./oathkeeper:/etc/oathkeeper/config
     environment:
-      # Internal Keycloak JWKS URL (container-to-container, always HTTP).
-      # Oathkeeper fetches public signing keys here to verify JWT signatures.
-      - KEYCLOAK_JWKS_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/certs
+      # Keycloak JWKS URL for JWT signature verification.
+      # Defaults to the internal container URL for embedded Keycloak deployments.
+      # Override in .env with the public HTTPS URL when using an external Keycloak.
+      - KEYCLOAK_JWKS_URL=${KEYCLOAK_JWKS_URL:-http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/certs}
       # Public Keycloak issuer URL. Must match exactly the 'iss' claim in JWTs.
-      # In HTTP mode, Keycloak sets KC_HOSTNAME to http://<SERVER_DNS>/auth,
-      # so the issuer in issued tokens is http://<SERVER_DNS>/auth/realms/<realm>.
-      - KEYCLOAK_ISSUER_URL=http://${SERVER_DNS:-localhost}/auth/realms/${KEYCLOAK_REALM:-dtaas}
+      # Read from .env so it works for both embedded HTTP Keycloak and external
+      # HTTPS Keycloak (the hardcoded http:// would mismatch an https:// issuer).
+      - KEYCLOAK_ISSUER_URL=${KEYCLOAK_ISSUER_URL:-http://localhost/auth/realms/dtaas}
       # Required audience ('aud' claim) in JWT access tokens.
       - KEYCLOAK_TARGET_AUDIENCE=${KEYCLOAK_CLIENT_ID:-dtaas-workspace}
     labels:
@@ -95,8 +101,10 @@ services:
       - "traefik.http.middlewares.oathkeeper-auth.forwardauth.address=http://oathkeeper:4456/decisions"
       # Forward authenticated user identity headers from Oathkeeper to upstream services.
       - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authResponseHeaders=X-User-Name,X-User-Subject"
-      # Forward the Authorization header (Bearer token) from the client to Oathkeeper.
-      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authRequestHeaders=Authorization"
+      # Forward the Authorization header and Cookie so Oathkeeper can validate
+      # both Bearer tokens (programmatic fetch) and the dtaas_access_token cookie
+      # (browser-navigation workspace requests).
+      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authRequestHeaders=Authorization,Cookie"
     networks:
       - frontend
       - users

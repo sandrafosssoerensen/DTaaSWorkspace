@@ -10,7 +10,6 @@ The `compose.traefik.secure.yml` file has been updated to use **Keycloak** as th
 - ✅ **Better User Management**: Centralized identity and access management
 - ✅ **Flexibility**: Easy to switch between internal and external Keycloak
 - ✅ **Enterprise Features**: Support for SSO, MFA, user federation, and more
-- ✅ **Backward Compatibility**: Can still use GitLab OAuth with minor configuration changes
 
 ## New Services
 
@@ -99,16 +98,6 @@ KEYCLOAK_CLIENT_SECRET=<from-keycloak>
 KEYCLOAK_ISSUER_URL=http://keycloak:8080/auth/realms/dtaas
 ```
 
-### Deprecated Variables (GitLab OAuth)
-
-These are no longer used by default but remain for backward compatibility:
-
-```bash
-OAUTH_URL=https://gitlab.com
-OAUTH_CLIENT_ID=...
-OAUTH_CLIENT_SECRET=...
-```
-
 ### Shared Variables
 
 ```bash
@@ -135,22 +124,6 @@ USERNAME2=user2
 4. Configure client in external Keycloak
 5. Update `.env` with credentials
 6. Restart services
-
-### Option 3: Continue Using GitLab OAuth
-
-1. Modify `traefik-forward-auth` service in compose file:
-   ```yaml
-   environment:
-     - DEFAULT_PROVIDER=generic-oauth
-     - PROVIDERS_GENERIC_OAUTH_AUTH_URL=${OAUTH_URL}/oauth/authorize
-     - PROVIDERS_GENERIC_OAUTH_TOKEN_URL=${OAUTH_URL}/oauth/token
-     - PROVIDERS_GENERIC_OAUTH_USER_URL=${OAUTH_URL}/api/v4/user
-     - PROVIDERS_GENERIC_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}
-     - PROVIDERS_GENERIC_OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET}
-     - PROVIDERS_GENERIC_OAUTH_SCOPE=read_user
-   ```
-2. Remove `keycloak` service from compose file
-3. Keep your existing `.env` configuration
 
 ## Benefits of This Design
 

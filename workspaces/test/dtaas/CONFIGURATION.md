@@ -58,15 +58,27 @@ USERNAME1=user1
 USERNAME2=user2
 ```
 
-**NOTE:** If the composition also needs forward auth, then these
-usernames must match the names of the gitlab users used in the forward auth.
-
 ## 📁 User Directories
 
 The compose files need user directories in `files`.
 Copy existing `user1` directory and paste as two new directories
 with usernames selected for your case. These usernames are mentioned as
 `USERNAME1` and `USERNAME2` in the docker compose files.
+
+Example:
+
+```bash
+cp -R workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/<USERNAME1>
+cp -R workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/<USERNAME2>
+```
+
+Important:
+
+- This is a one-time setup per username (unless you delete the folder).
+- In multi-user compose files, `./files/<USERNAME>` is bind-mounted to `/workspace`.
+- If private DTaaS library paths return Jupyter 404, verify these per-user
+  subdirectories exist under `files/<USERNAME>`: `functions`, `models`, `tools`,
+  `data`, `digital_twins`.
 
 ## 🌐 Domain
 
@@ -146,7 +158,7 @@ Then, edit the new DTaaS Web Client config file, updating the following values:
 ### 🔑🖥️ Client OAuth2 Setup
 
 The DTaaS web client also uses OIDC directly and must point to the Keycloak
-issuer, not to a GitLab-style `.well-known` URL. Use the Keycloak realm issuer:
+issuer. Use the Keycloak realm issuer URL:
 
 - `https://<DOMAIN_NAME>/auth/realms/dtaas` for TLS deployments
 - `http://<DOMAIN_NAME>/auth/realms/dtaas` for HTTP-only development
@@ -165,24 +177,16 @@ Update [`config/client.js`](./config/client.js) so these values match your realm
 - `REACT_APP_AUTH_AUTHORITY`: the realm issuer URL
 - `REACT_APP_REDIRECT_URI`: `<PROTOCOL>://<DOMAIN_NAME>/Library`
 - `REACT_APP_LOGOUT_REDIRECT_URI`: `<PROTOCOL>://<DOMAIN_NAME>/`
-- `REACT_APP_GITLAB_SCOPES`: start with `openid profile email`
-
-If DTaaS still explicitly requests GitLab-style scopes such as `read_user`,
-`read_repository`, or `api`, only then add matching optional client scopes in
-Keycloak so the request is accepted.
 
 ## 🔑 OAuth2 Configuration
 
-Both this composition and the contained DTaaS Web Client uses
-OAuth2 for authentication. You'll need to configure an OAuth2 apllication
-for each, with your OAuth2 provider. This guide assumes that you use
-Gitlab as your provider; other providers are possible but are not covered
-by this guide.
+Both this composition and the contained DTaaS Web Client use OIDC for authentication
+through Keycloak as the identity provider.
 
-### 🎯 Keycloak Authentication Setup (Recommended)
+### 🎯 Keycloak Authentication Setup
 
 The default configuration for `compose.traefik.secure.yml` and
-`compose.traefik.secure.yml` now use **Keycloak**
+`compose.traefik.secure.tls.yml` use **Keycloak**
 for authentication via OIDC (OpenID Connect). Keycloak provides a robust, 
 enterprise-grade identity and access management solution.
 
@@ -219,79 +223,3 @@ Quick overview:
    # Generate a random string (at least 16 characters)
    OAUTH_SECRET=$(openssl rand -base64 32)
    ```
-
-### 🔄 GitLab OAuth2 Configuration (Legacy/Alternative)
-
-If you prefer to use GitLab instead of Keycloak, you can modify the 
-`traefik-forward-auth` service configuration in the compose file.
-
-1. Go to your GitLab instance → Profile Settings → Applications
-2. Create a new application with:
-   - **Name**: DTaaS Workspace
-   - **Redirect URI**: `https://yourdomain.com/_oauth`
-   - **Confidential**: Ticked
-   - **Scopes**: `read_user`, `read_email`
-
-#### Configure Environment Variables
-
-Update the environment file, [`config/.env`](./config/.env),
-   with the **Application ID** and **Secret**:
-
-   ```bash
-   ...
-   # OAuth Application Client ID
-   # Obtained when creating the OAuth application in GitLab
-   OAUTH_CLIENT_ID=<APPLICATION_ID>
-
-   # OAuth Application Client Secret
-   # Obtained when creating the OAuth application in GitLab
-   OAUTH_CLIENT_SECRET=<SECRET>
-   ...
-   ```
-
-4. Generate a base 64, 32 byte random string:
-
-   ```bash
-   openssl rand -base64 32
-   ```
-
-   and update the environment file, [`config/.env`](./config/.env), with it:
-
-   ```bash
-   ...
-   # Secret key for encrypting OAuth session data
-   # Generate a random string (at least 16 characters)
-   # Example: openssl rand -base64 32
-   OAUTH_SECRET=<RANDOM_STRIN>
-   ...
-   ```
-
-## 🚪 Traefik Forward Auth Configuration
-
-The [`config/conf.example`](./config/conf.example) contains
-example configuration for the forward-auth service.
-
-Create a copy of this example file without the example suffix:
-
-```bash
-cp config/conf.example config/conf
-```
-
-Then update the configuration file with the usernames and emails of
-the GitLab users that correspond to user 1 and 2 respectively.
-(You must either have two seperate GitLab users, or skip the configuration of
-one of the two users).
-
-```txt
-rule.user1_access.action=auth
-rule.user1_access.rule=PathPrefix(`/<USERNAME_USER1>`)
-rule.user1_access.whitelist = <EMAIL_USER1>
-
-rule.user2_access.action=auth
-rule.user2_access.rule=PathPrefix(`/<USERNAME_USER2>`)
-rule.user2_access.whitelist = <EMAIL_USER2>
-```
-
-**NOTE:** Ensure that the usernames set in the
-[Usernames configuration step](#-usernames) are the same as those set
-in the Traefik Forward Auth configuration file.

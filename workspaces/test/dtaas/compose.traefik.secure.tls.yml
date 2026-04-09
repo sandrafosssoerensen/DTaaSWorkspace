@@ -141,6 +141,11 @@ services:
           -e 's|$${KEYCLOAK_ISSUER_URL}|'"$$KEYCLOAK_ISSUER_URL"'|g' \
           -e 's|$${KEYCLOAK_TARGET_AUDIENCE}|'"$$KEYCLOAK_TARGET_AUDIENCE"'|g' \
           /etc/oathkeeper/config/oathkeeper.yml > /tmp/oathkeeper.yml &&
+        sed \
+          -e 's|$${KEYCLOAK_JWKS_URL}|'"$$KEYCLOAK_JWKS_URL"'|g' \
+          -e 's|$${KEYCLOAK_ISSUER_URL}|'"$$KEYCLOAK_ISSUER_URL"'|g' \
+          -e 's|$${KEYCLOAK_TARGET_AUDIENCE}|'"$$KEYCLOAK_TARGET_AUDIENCE"'|g' \
+          /etc/oathkeeper/config/access-rules.yml > /tmp/access-rules.yml &&
         oathkeeper serve -c /tmp/oathkeeper.yml
     volumes:
       - "./oathkeeper:/etc/oathkeeper/config"
@@ -161,8 +166,10 @@ services:
       - "traefik.http.middlewares.oathkeeper-auth.forwardauth.address=http://oathkeeper:4456/decisions"
       # Forward authenticated user identity headers from Oathkeeper to upstream services.
       - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authResponseHeaders=X-User-Name,X-User-Subject"
-      # Forward the Authorization header (Bearer token) from the client to Oathkeeper.
-      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authRequestHeaders=Authorization"
+      # Forward the Authorization header and Cookie so Oathkeeper can validate
+      # both Bearer tokens (programmatic fetch) and the dtaas_access_token cookie
+      # (browser-navigation workspace requests).
+      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authRequestHeaders=Authorization,Cookie"
     networks:
       - frontend
       - users

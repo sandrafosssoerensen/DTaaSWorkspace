@@ -47,7 +47,27 @@ MAPPERS: list[dict[str, Any]] = [
             "userinfo.token.claim": "true",
             "multivalued": "true",
         },
-    }
+    },
+]
+
+# Mappers applied directly on the client regardless of shared-scope mode.
+# The audience mapper must live on the client itself so that Oathkeeper's
+# target_audience check passes for tokens issued to this client.
+CLIENT_MAPPERS: list[dict[str, Any]] = [
+    {
+        "name": "audience",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "consentRequired": False,
+        "config": {
+            # Use included.custom.audience (a literal string) rather than
+            # included.client.audience, which silently does nothing for public
+            # clients that are not resource servers.
+            "included.custom.audience": "dtaas-client",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+        },
+    },
 ]
 
 PAGE_SIZE = 200
@@ -69,6 +89,14 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     keycloak_admin: str = "admin"
     keycloak_admin_password: str = "admin"
     profile_base_url: str = ""
+    keycloak_public_client: bool = True
+    keycloak_standard_flow_enabled: bool = True
+    keycloak_pkce_method: str = "S256"
+    keycloak_redirect_uris: list[str] | None = None
+    keycloak_web_origins: list[str] | None = None
+    keycloak_post_logout_redirect_uris: list[str] | None = None
+    keycloak_default_client_scopes: list[str] | None = None
+    keycloak_optional_client_scopes: list[str] | None = None
 
 
 def parse_bool_env(name: str, default: bool = False) -> bool:
@@ -106,6 +134,15 @@ def parse_user_profiles_env(name: str) -> list[str] | None:
     return usernames or None
 
 
+def parse_csv_env(name: str) -> list[str] | None:
+    """Parse comma-separated values from environment into a list."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    values = [item.strip() for item in raw.split(",") if item.strip()]
+    return values or None
+
+
 def normalize_path(path: str) -> str:
     """Normalize context path so root resolves to an empty suffix."""
     if path in ("", "/"):
@@ -116,8 +153,9 @@ def normalize_path(path: str) -> str:
 class KeycloakRestConfigurator:
     """Implements the Keycloak REST configuration workflow."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, dry_run: bool = False) -> None:
         self.settings = settings
+        self.dry_run = dry_run
         self.server_url = (
             f"{settings.keycloak_base_url}{normalize_path(settings.keycloak_context_path)}"
         )
@@ -127,6 +165,8 @@ class KeycloakRestConfigurator:
         """Run the full claims-configuration workflow."""
         token = self.get_access_token()
         client_uuid = self.get_client_uuid(token)
+        self.ensure_client_auth_settings(token, client_uuid)
+        self.ensure_client_scopes(token, client_uuid)
         if self.settings.keycloak_use_shared_scope:
             scope_id = self.get_or_create_scope_id(token)
             for mapper in MAPPERS:
@@ -136,8 +176,185 @@ class KeycloakRestConfigurator:
             for mapper in MAPPERS:
                 self.ensure_mapper_on_client(token, client_uuid, mapper)
 
+        for mapper in self._client_mappers():
+            self.ensure_mapper_on_client(token, client_uuid, mapper)
+
         self.ensure_user_profile_mappers(token)
         self.update_user_profiles(token)
+
+    def ensure_client_auth_settings(self, token: str, client_uuid: str) -> None:
+        """Ensure DTaaS client auth settings (PKCE/public client/URIs) are set."""
+        endpoint = f"{self.admin_url}/{self.settings.keycloak_realm}/clients/{client_uuid}"
+        client = self._request_json(endpoint, token=token)
+
+        changed = False
+        attributes = dict(client.get("attributes", {}))
+
+        if client.get("publicClient") != self.settings.keycloak_public_client:
+            client["publicClient"] = self.settings.keycloak_public_client
+            changed = True
+
+        if (
+            client.get("standardFlowEnabled")
+            != self.settings.keycloak_standard_flow_enabled
+        ):
+            client["standardFlowEnabled"] = self.settings.keycloak_standard_flow_enabled
+            changed = True
+
+        if attributes.get("pkce.code.challenge.method") != self.settings.keycloak_pkce_method:
+            attributes["pkce.code.challenge.method"] = self.settings.keycloak_pkce_method
+            changed = True
+
+        redirect_uris = self.settings.keycloak_redirect_uris
+        if redirect_uris is not None and client.get("redirectUris") != redirect_uris:
+            client["redirectUris"] = redirect_uris
+            changed = True
+
+        web_origins = self.settings.keycloak_web_origins
+        if web_origins is not None and client.get("webOrigins") != web_origins:
+            client["webOrigins"] = web_origins
+            changed = True
+
+        post_logout = self.settings.keycloak_post_logout_redirect_uris
+        if post_logout is not None:
+            # Keycloak stores this as a single string attribute.
+            value = "##".join(post_logout)
+            if attributes.get("post.logout.redirect.uris") != value:
+                attributes["post.logout.redirect.uris"] = value
+                changed = True
+
+        if changed:
+            client["attributes"] = attributes
+            self._request_empty_or_log(
+                endpoint,
+                method="PUT",
+                token=token,
+                json_data=client,
+                description="Update client auth settings",
+            )
+
+    def ensure_client_scopes(self, token: str, client_uuid: str) -> None:
+        """Ensure configured default/optional client scope assignments."""
+        default_names = self.settings.keycloak_default_client_scopes
+        optional_names = self.settings.keycloak_optional_client_scopes
+        if default_names is None and optional_names is None:
+            return
+
+        all_scopes_by_name = self._get_scope_name_id_map(token)
+
+        if default_names is not None:
+            self._enforce_scope_category(
+                token=token,
+                client_uuid=client_uuid,
+                category="default-client-scopes",
+                desired_scope_names=default_names,
+                all_scopes_by_name=all_scopes_by_name,
+            )
+
+        if optional_names is not None:
+            self._enforce_scope_category(
+                token=token,
+                client_uuid=client_uuid,
+                category="optional-client-scopes",
+                desired_scope_names=optional_names,
+                all_scopes_by_name=all_scopes_by_name,
+            )
+
+    def _get_scope_name_id_map(self, token: str) -> dict[str, str]:
+        """Return mapping of client-scope name to ID for the target realm."""
+        first = 0
+        by_name: dict[str, str] = {}
+        while True:
+            scopes = self._request_json(
+                f"{self.admin_url}/{self.settings.keycloak_realm}/client-scopes"
+                f"?first={first}&max={PAGE_SIZE}",
+                token=token,
+            )
+            if not scopes:
+                break
+
+            for scope in scopes:
+                name = scope.get("name")
+                scope_id = scope.get("id")
+                if name and scope_id:
+                    by_name[str(name)] = str(scope_id)
+
+            if len(scopes) < PAGE_SIZE:
+                break
+            first += PAGE_SIZE
+
+        return by_name
+
+    def _enforce_scope_category(
+        self,
+        token: str,
+        client_uuid: str,
+        category: str,
+        desired_scope_names: list[str],
+        all_scopes_by_name: dict[str, str],
+    ) -> None:
+        """Ensure exactly the desired scopes are assigned in one category."""
+        desired_ids: set[str] = set()
+        for name in desired_scope_names:
+            scope_id = all_scopes_by_name.get(name)
+            if not scope_id:
+                raise RuntimeError(
+                    f"Client scope '{name}' was not found in realm "
+                    f"{self.settings.keycloak_realm}"
+                )
+            desired_ids.add(scope_id)
+
+        endpoint = (
+            f"{self.admin_url}/{self.settings.keycloak_realm}/clients/{client_uuid}/"
+            f"{category}"
+        )
+        assigned = self._request_json(endpoint, token=token)
+        assigned_ids = {
+            str(item.get("id"))
+            for item in assigned
+            if item.get("id")
+        }
+
+        to_add = sorted(desired_ids - assigned_ids)
+        to_remove = sorted(assigned_ids - desired_ids)
+
+        for scope_id in to_add:
+            self._request_empty_or_log(
+                f"{endpoint}/{scope_id}",
+                method="PUT",
+                token=token,
+                description=f"Assign scope '{scope_id}' to {category}",
+            )
+
+        for scope_id in to_remove:
+            self._request_empty_or_log(
+                f"{endpoint}/{scope_id}",
+                method="DELETE",
+                token=token,
+                description=f"Unassign scope '{scope_id}' from {category}",
+            )
+
+    def _client_mappers(self) -> list[dict[str, Any]]:
+        """Return mappers to apply directly on the client.
+
+        These are applied regardless of shared-scope mode. The audience mapper
+        is built dynamically so its included.client.audience always matches
+        the configured KEYCLOAK_CLIENT_ID.
+        """
+        return [
+            {
+                **mapper,
+                "config": {
+                    **mapper["config"],
+                    "included.custom.audience": self.settings.keycloak_client_id,
+                },
+            }
+            if mapper["protocolMapper"] == "oidc-audience-mapper"
+            else mapper
+            for mapper in CLIENT_MAPPERS
+        ]
+
+
 
     def get_access_token(self) -> str:
         """Get an admin token using service account or username/password."""
@@ -211,7 +428,15 @@ class KeycloakRestConfigurator:
             if scope.get("name") == scope_name and scope.get("id"):
                 return scope["id"]
 
-        self._request_empty(
+        if self.dry_run:
+            print(
+                "[DRY-RUN] POST "
+                f"{self.admin_url}/{self.settings.keycloak_realm}/client-scopes "
+                f":: Create shared scope '{scope_name}'"
+            )
+            return f"dry-run-scope-id-{scope_name}"
+
+        self._request_empty_or_log(
             f"{self.admin_url}/{self.settings.keycloak_realm}/client-scopes",
             method="POST",
             json_data={
@@ -220,6 +445,7 @@ class KeycloakRestConfigurator:
                 "description": "DTaaS shared custom mappers (profile claim; optional groups)",
             },
             token=token,
+            description=f"Create shared scope '{scope_name}'",
         )
 
         scopes = self._request_json(
@@ -248,15 +474,22 @@ class KeycloakRestConfigurator:
         if existing_id:
             updated = dict(mapper)
             updated["id"] = existing_id
-            self._request_empty(
+            self._request_empty_or_log(
                 f"{endpoint}/{existing_id}",
                 method="PUT",
                 json_data=updated,
                 token=token,
+                description=f"Update shared-scope mapper '{mapper['name']}'",
             )
             return
 
-        self._request_empty(endpoint, method="POST", json_data=mapper, token=token)
+        self._request_empty_or_log(
+            endpoint,
+            method="POST",
+            json_data=mapper,
+            token=token,
+            description=f"Create shared-scope mapper '{mapper['name']}'",
+        )
 
     def ensure_mapper_on_client(
         self, token: str, client_uuid: str, mapper: dict[str, Any]
@@ -276,15 +509,22 @@ class KeycloakRestConfigurator:
         if existing_id:
             updated = dict(mapper)
             updated["id"] = existing_id
-            self._request_empty(
+            self._request_empty_or_log(
                 f"{endpoint}/{existing_id}",
                 method="PUT",
                 json_data=updated,
                 token=token,
+                description=f"Update client mapper '{mapper['name']}'",
             )
             return
 
-        self._request_empty(endpoint, method="POST", json_data=mapper, token=token)
+        self._request_empty_or_log(
+            endpoint,
+            method="POST",
+            json_data=mapper,
+            token=token,
+            description=f"Create client mapper '{mapper['name']}'",
+        )
 
     def ensure_user_profile_mappers(self, token: str) -> None:
         """Ensure user-profile metadata exists for attributes mapped from user model."""
@@ -315,7 +555,13 @@ class KeycloakRestConfigurator:
                 )
 
         profile["attributes"] = attributes
-        self._request_empty(endpoint, method="PUT", json_data=profile, token=token)
+        self._request_empty_or_log(
+            endpoint,
+            method="PUT",
+            json_data=profile,
+            token=token,
+            description="Update user-profile schema mappers",
+        )
 
     def ensure_scope_assigned(self, token: str, client_uuid: str, scope_id: str) -> None:
         """Ensure shared scope is assigned as a default scope on the client."""
@@ -327,11 +573,15 @@ class KeycloakRestConfigurator:
         if any(scope.get("id") == scope_id for scope in assigned):
             return
 
-        self._request_empty(
+        self._request_empty_or_log(
             f"{self.admin_url}/{self.settings.keycloak_realm}/clients/{client_uuid}"
             f"/default-client-scopes/{scope_id}",
             method="PUT",
             token=token,
+            description=(
+                f"Assign shared scope '{self.settings.keycloak_shared_scope_name}' "
+                "as default client scope"
+            ),
         )
 
     def update_user_profiles(self, token: str) -> None:
@@ -368,11 +618,12 @@ class KeycloakRestConfigurator:
 
                 payload = dict(user_details)
                 payload["attributes"] = merged_attributes
-                self._request_empty(
+                self._request_empty_or_log(
                     f"{self.admin_url}/{self.settings.keycloak_realm}/users/{user_id}",
                     method="PUT",
                     json_data=payload,
                     token=token,
+                    description=f"Update profile attribute for user '{username}'",
                 )
 
             if len(users) < PAGE_SIZE:
@@ -430,6 +681,25 @@ class KeycloakRestConfigurator:
             token=token,
         )
 
+    def _request_empty_or_log(
+        self,
+        url: str,
+        method: str,
+        token: str,
+        description: str,
+        json_data: dict[str, Any] | None = None,
+    ) -> None:
+        """Execute a write request or log intended change in dry-run mode."""
+        if self.dry_run:
+            print(f"[DRY-RUN] {method} {url} :: {description}")
+            return
+        self._request_empty(
+            url=url,
+            method=method,
+            token=token,
+            json_data=json_data,
+        )
+
 
 def load_dotenv_file(env_file: str) -> None:
     """Load KEY=VALUE pairs from a dotenv file into process environment."""
@@ -483,6 +753,22 @@ def settings_from_env() -> Settings:
             "KEYCLOAK_PROFILE_BASE_URL",
             os.getenv("PROFILE_BASE_URL", os.getenv("KEYCLOAK_BASE_URL", "http://localhost")),
         ),
+        keycloak_public_client=parse_bool_env("KEYCLOAK_PUBLIC_CLIENT", True),
+        keycloak_standard_flow_enabled=parse_bool_env(
+            "KEYCLOAK_STANDARD_FLOW_ENABLED", True
+        ),
+        keycloak_pkce_method=os.getenv("KEYCLOAK_PKCE_METHOD", "S256"),
+        keycloak_redirect_uris=parse_csv_env("KEYCLOAK_REDIRECT_URIS"),
+        keycloak_web_origins=parse_csv_env("KEYCLOAK_WEB_ORIGINS"),
+        keycloak_post_logout_redirect_uris=parse_csv_env(
+            "KEYCLOAK_POST_LOGOUT_REDIRECT_URIS"
+        ),
+        keycloak_default_client_scopes=parse_csv_env(
+            "KEYCLOAK_DEFAULT_CLIENT_SCOPES"
+        ),
+        keycloak_optional_client_scopes=parse_csv_env(
+            "KEYCLOAK_OPTIONAL_CLIENT_SCOPES"
+        ),
     )
 
 
@@ -497,19 +783,30 @@ def main() -> int:
             default="",
             help="Path to .env file containing KEYCLOAK_* settings",
         )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Print planned write operations without applying them",
+        )
         args = parser.parse_args()
 
         env_file = args.env_file or resolve_default_env_file()
         if env_file:
             load_dotenv_file(env_file)
 
-        configurator = KeycloakRestConfigurator(settings_from_env())
+        configurator = KeycloakRestConfigurator(
+            settings_from_env(),
+            dry_run=args.dry_run,
+        )
         configurator.run()
     except Exception as exc:  # pylint: disable=broad-except
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print("Keycloak shared scope and mappers configured successfully (REST API).")
+    if args.dry_run:
+        print("Dry-run completed successfully (no changes were written).")
+    else:
+        print("Keycloak shared scope and mappers configured successfully (REST API).")
     return 0
 
 

@@ -45,6 +45,14 @@ cp -R workspaces/test/dtaas/files/user1 workspaces/test/dtaas/files/<USERNAME2>
 sudo chown -R 1000:100 workspaces/test/dtaas/files
 ```
 
+Notes:
+
+- This is a one-time setup per username. You do not need to recreate these
+  folders on every `docker compose down` / `up`.
+- The per-user folder is bind-mounted to `/workspace`.
+- For DTaaS private library paths, ensure each user folder contains
+  `functions`, `models`, `tools`, `data`, and `digital_twins`.
+
 ## :rocket: Start Services
 
 To start all services (Traefik, Keycloak, auth, client, and workspaces):

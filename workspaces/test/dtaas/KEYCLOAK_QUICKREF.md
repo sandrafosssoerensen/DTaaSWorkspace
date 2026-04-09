@@ -61,7 +61,6 @@ Navigate to `https://foo.com/` and login with Keycloak user.
 ✅ **Flexible**: Easy to switch to external Keycloak
 ✅ **Enterprise-Ready**: Supports SSO, MFA, user federation
 ✅ **Minimal Changes**: Environment-variable based configuration
-✅ **Backward Compatible**: Can still use GitLab OAuth
 
 ## Migration Paths
 
@@ -69,18 +68,6 @@ Navigate to `https://foo.com/` and login with Keycloak user.
 Just change `KEYCLOAK_ISSUER_URL` in `.env`:
 ```bash
 KEYCLOAK_ISSUER_URL=https://foo.com/auth/realms/dtaas
-```
-
-### Revert to GitLab OAuth
-Modify `traefik-forward-auth` in compose file:
-```yaml
-environment:
-  - DEFAULT_PROVIDER=generic-oauth
-  - PROVIDERS_GENERIC_OAUTH_AUTH_URL=${OAUTH_URL}/oauth/authorize
-  - PROVIDERS_GENERIC_OAUTH_TOKEN_URL=${OAUTH_URL}/oauth/token
-  - PROVIDERS_GENERIC_OAUTH_USER_URL=${OAUTH_URL}/api/v4/user
-  - PROVIDERS_GENERIC_OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}
-  - PROVIDERS_GENERIC_OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET}
 ```
 
 ## Documentation

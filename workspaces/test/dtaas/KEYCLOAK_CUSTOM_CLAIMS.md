@@ -11,10 +11,10 @@ This is document containing how the userinfo payload is expected by DTaaS.
   "name": "alice",
   "nickname": "alice",
   "preferred_username": "alice",
-  "profile": "https://foo.com/gitlab/alice",
+  "profile": "https://foo.com/users/alice",
   "picture": "https://secure.gravatar.com/avatar/xxx?s=80&d=identicon",
   "groups": ["dtaas"],
-  "https://gitlab.org/claims/groups/owner": ["dtaas"]
+  "https://dtaas-digitaltwin.com/claims/groups/owner": ["dtaas"]
 }
 ```
 
@@ -23,7 +23,7 @@ Notes:
 - `name`, `nickname`, `preferred_username`, and `picture` come from standard OIDC scopes.
 - `sub_legacy` is a custom user attribute mapper.
 - `profile` is a custom user attribute mapper.
-- `groups` and `https://gitlab.org/claims/groups/owner` are group membership mappers.
+- `groups` and `https://dtaas-digitaltwin.com/claims/groups/owner` are group membership mappers.
 
 ## Mapper Configuration (Shared Client Scope)
 
@@ -33,9 +33,14 @@ Required custom mappers in the shared scope:
 - `sub_legacy`:
   `oidc-usermodel-attribute-mapper`, `user.attribute=sub_legacy`, `claim.name=sub_legacy`, userinfo only.
 - `groups`:
-  `oidc-group-membership-mapper`, `claim.name=groups`, userinfo only, multivalued.
+  `oidc-group-membership-mapper`, `claim.name=groups`, **access token and userinfo**, multivalued.
+  (`access.token.claim=true` required so OPA policy can read groups from the JWT directly.)
 - `groups_owner`:
-  `oidc-group-membership-mapper`, `claim.name=https://gitlab.org/claims/groups/owner`, userinfo only, multivalued.
+  `oidc-group-membership-mapper`, `claim.name=https://dtaas-digitaltwin.com/claims/groups/owner`, userinfo only, multivalued.
+- `audience`:
+  `oidc-audience-mapper`, `included.client.audience=dtaas-client`, **access token only**.
+  (Required so Oathkeeper's `target_audience` check passes — Keycloak does not include the
+  client ID in `aud` by default.)
 
 Not part of this contract:
 - `department`
@@ -44,7 +49,7 @@ Not part of this contract:
 ## Data Requirements
 
 For each user:
-- Set `attributes.profile` to `https://foo.com/gitlab/<username>`.
+- Set `attributes.profile` to `https://foo.com/users/<username>`.
 - Set `attributes.sub_legacy` to legacy subject value.
 - Ensure user belongs to at least one group (for both group claims).
 

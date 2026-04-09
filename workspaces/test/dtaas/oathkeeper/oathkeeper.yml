@@ -12,7 +12,7 @@ serve:
 access_rules:
   matching_strategy: regexp
   repositories:
-    - file:///etc/oathkeeper/config/access-rules.yml
+    - file:///tmp/access-rules.yml
 
 log:
   level: info
@@ -43,7 +43,7 @@ authenticators:
         - RS384
         - RS512
       token_from:
-        header: Authorization
+        cookie: dtaas_access_token
       scope_strategy: none
       target_audience:
         - ${KEYCLOAK_TARGET_AUDIENCE}
