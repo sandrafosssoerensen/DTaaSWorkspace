@@ -173,10 +173,11 @@ Check:
 Create the client first in the target realm, or set `KEYCLOAK_CLIENT_ID` to an
 existing client.
 
-### `KEYCLOAK_SHARED_SCOPE_NAME must be set`
+### Shared scope mode issues
 
-`KEYCLOAK_USE_SHARED_SCOPE=true` was set but `KEYCLOAK_SHARED_SCOPE_NAME` was
-not provided. Set both variables together.
+If `KEYCLOAK_USE_SHARED_SCOPE=true`, the script uses
+`KEYCLOAK_SHARED_SCOPE_NAME` when provided and otherwise defaults to
+`dtaas-shared`.
 
 ### TLS or certificate failures
 

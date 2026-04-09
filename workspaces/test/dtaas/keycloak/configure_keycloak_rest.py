@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 MAPPERS: list[dict[str, Any]] = [
     {
         "name": "profile",
+        "consentText": "DTaaS custom mapper for profile claim",
         "protocol": "openid-connect",
         "protocolMapper": "oidc-usermodel-attribute-mapper",
         "consentRequired": False,
@@ -60,12 +61,49 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     keycloak_context_path: str = "/auth"
     keycloak_realm: str = "dtaas"
     keycloak_client_id: str = "dtaas-workspace"
+    keycloak_use_shared_scope: bool = False
     keycloak_shared_scope_name: str = "dtaas-shared"
+    keycloak_user_profiles: list[str] | None = None
     keycloak_admin_client_id: str = ""
     keycloak_admin_client_secret: str = ""
     keycloak_admin: str = "admin"
     keycloak_admin_password: str = "admin"
     profile_base_url: str = ""
+
+
+def parse_bool_env(name: str, default: bool = False) -> bool:
+    """Parse environment booleans with common true/false string forms."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off", ""}:
+        return False
+    raise RuntimeError(
+        f"Invalid boolean value for {name}: '{raw}'. Use true/false."
+    )
+
+
+def parse_user_profiles_env(name: str) -> list[str] | None:
+    """Parse optional JSON list of usernames from environment."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Invalid JSON value for {name}. Expected array of usernames."
+        ) from exc
+
+    if not isinstance(loaded, list):
+        raise RuntimeError(f"Invalid value for {name}. Expected JSON array.")
+
+    usernames = [str(item).strip() for item in loaded if str(item).strip()]
+    return usernames or None
 
 
 def normalize_path(path: str) -> str:
@@ -89,13 +127,16 @@ class KeycloakRestConfigurator:
         """Run the full claims-configuration workflow."""
         token = self.get_access_token()
         client_uuid = self.get_client_uuid(token)
-        scope_id = self.get_or_create_scope_id(token)
-
-        for mapper in MAPPERS:
-            self.ensure_mapper(token, scope_id, mapper)
+        if self.settings.keycloak_use_shared_scope:
+            scope_id = self.get_or_create_scope_id(token)
+            for mapper in MAPPERS:
+                self.ensure_mapper(token, scope_id, mapper)
+            self.ensure_scope_assigned(token, client_uuid, scope_id)
+        else:
+            for mapper in MAPPERS:
+                self.ensure_mapper_on_client(token, client_uuid, mapper)
 
         self.ensure_user_profile_mappers(token)
-        self.ensure_scope_assigned(token, client_uuid, scope_id)
         self.update_user_profiles(token)
 
     def get_access_token(self) -> str:
@@ -173,7 +214,11 @@ class KeycloakRestConfigurator:
         self._request_empty(
             f"{self.admin_url}/{self.settings.keycloak_realm}/client-scopes",
             method="POST",
-            json_data={"name": scope_name, "protocol": "openid-connect"},
+            json_data={
+                "name": scope_name,
+                "protocol": "openid-connect",
+                "description": "DTaaS shared custom mappers (profile claim; optional groups)",
+            },
             token=token,
         )
 
@@ -191,6 +236,34 @@ class KeycloakRestConfigurator:
         """Upsert mapper by name in the shared scope."""
         endpoint = (
             f"{self.admin_url}/{self.settings.keycloak_realm}/client-scopes/{scope_id}"
+            "/protocol-mappers/models"
+        )
+        existing = self._request_json(endpoint, token=token)
+        existing_id = ""
+        for item in existing:
+            if item.get("name") == mapper["name"] and item.get("id"):
+                existing_id = item["id"]
+                break
+
+        if existing_id:
+            updated = dict(mapper)
+            updated["id"] = existing_id
+            self._request_empty(
+                f"{endpoint}/{existing_id}",
+                method="PUT",
+                json_data=updated,
+                token=token,
+            )
+            return
+
+        self._request_empty(endpoint, method="POST", json_data=mapper, token=token)
+
+    def ensure_mapper_on_client(
+        self, token: str, client_uuid: str, mapper: dict[str, Any]
+    ) -> None:
+        """Upsert mapper by name directly on a target client."""
+        endpoint = (
+            f"{self.admin_url}/{self.settings.keycloak_realm}/clients/{client_uuid}"
             "/protocol-mappers/models"
         )
         existing = self._request_json(endpoint, token=token)
@@ -263,6 +336,8 @@ class KeycloakRestConfigurator:
 
     def update_user_profiles(self, token: str) -> None:
         """Merge and update each user's profile attribute URL."""
+        target_usernames = set(self.settings.keycloak_user_profiles or [])
+        use_filter = bool(target_usernames)
         first = 0
         while True:
             query = urlencode({"first": first, "max": PAGE_SIZE})
@@ -277,6 +352,8 @@ class KeycloakRestConfigurator:
                 user_id = user.get("id", "")
                 username = user.get("username", "")
                 if not user_id or not username:
+                    continue
+                if use_filter and username not in target_usernames:
                     continue
 
                 user_details = self._request_json(
@@ -395,7 +472,9 @@ def settings_from_env() -> Settings:
         keycloak_context_path=os.getenv("KEYCLOAK_CONTEXT_PATH", "/auth"),
         keycloak_realm=os.getenv("KEYCLOAK_REALM", "dtaas"),
         keycloak_client_id=os.getenv("KEYCLOAK_CLIENT_ID", "dtaas-workspace"),
+        keycloak_use_shared_scope=parse_bool_env("KEYCLOAK_USE_SHARED_SCOPE", False),
         keycloak_shared_scope_name=os.getenv("KEYCLOAK_SHARED_SCOPE_NAME", "dtaas-shared"),
+        keycloak_user_profiles=parse_user_profiles_env("KEYCLOAK_USER_PROFILES"),
         keycloak_admin_client_id=os.getenv("KEYCLOAK_ADMIN_CLIENT_ID", ""),
         keycloak_admin_client_secret=os.getenv("KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
         keycloak_admin=os.getenv("KEYCLOAK_ADMIN", "admin"),

@@ -241,8 +241,8 @@ keycloak:
 
 ### Custom Claims and Scopes
 
-The DTaaS workspace uses a `dtaas-shared` client scope with four protocol mappers
-that enrich tokens with group membership and user profile information.
+The DTaaS workspace configurator manages a `profile` protocol mapper and supports
+both direct client mapper mode (default) and shared-scope mode.
 
 Use the automation script to configure this idempotently against any Keycloak instance:
 
