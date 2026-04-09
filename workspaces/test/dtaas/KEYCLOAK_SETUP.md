@@ -287,28 +287,44 @@ keycloak:
 
 ### Custom Claims and Scopes
 
-To access custom user attributes:
+The DTaaS workspace configurator manages a `profile` protocol mapper and supports
+both direct client mapper mode (default) and shared-scope mode.
 
-1. In Keycloak, create client scopes with mappers
-2. Assign scopes to the client
-3. Configure traefik-forward-auth to request additional scopes
+Use the automation script to configure this idempotently against any Keycloak instance:
 
-## Manual Compatibility Tests
+```bash
+# Python script (Linux / macOS / WSL)
+KEYCLOAK_BASE_URL=https://your-keycloak \
+KEYCLOAK_CONTEXT_PATH=/auth \
+KEYCLOAK_REALM=dtaas \
+KEYCLOAK_CLIENT_ID=dtaas-workspace \
+KEYCLOAK_ADMIN=admin \
+KEYCLOAK_ADMIN_PASSWORD=changeme \
+python3 workspaces/test/dtaas/keycloak/configure_keycloak_rest.py
+```
 
-Before treating the integration as complete, verify these four checks:
+The script creates (or reuses) the following protocol mapper:
 
-1. **Discovery**
-   - Open `https://<SERVER_DNS>/auth/realms/<realm>/.well-known/openid-configuration`
-   - Confirm the JSON contains `authorization_endpoint`, `token_endpoint`,
-     `userinfo_endpoint`, and `jwks_uri`
-2. **Login and code flow**
-   - Trigger login from DTaaS and verify it redirects to Keycloak and back
-3. **Token exchange**
-   - Confirm DTaaS receives an access token, refresh token, and ID token
-4. **Userinfo**
-   - Confirm the response includes `preferred_username`, `profile`, and `groups`
-   - If you preserve GitLab compatibility, confirm `profile` exactly matches
-     `https://foo.com/gitlab/{username}`
+| Mapper | Claim name | Access token | Userinfo |
+|--------|-----------|:---:|:---:|
+| `profile` | `profile` | — | ✓ |
+
+By default, the mapper is placed directly on the `dtaas-workspace` client. Optionally,
+you can enable `KEYCLOAK_USE_SHARED_SCOPE=true` to place it on a shared client scope
+instead (see `.env.example` for configuration).
+
+The script also sets each user's `profile` attribute to `<PROFILE_BASE_URL>/<username>`
+(if `KEYCLOAK_PROFILE_BASE_URL` and `KEYCLOAK_USER_PROFILES` are configured).
+This operation is merge-safe — other existing attributes are preserved.
+
+> **Note**: `groups` is a built-in Keycloak mapper; the script does not create it.
+> To ensure group membership claims appear in tokens, assign the default `groups`
+> scope to your client or manually add the `groups` mapper if needed. The `groups_owner`
+> and `sub_legacy` mappers are not currently configured by this script.
+
+For the full environment variable reference, run the configurator with `--help`
+or see the inline documentation in
+`workspaces/test/dtaas/keycloak/configure_keycloak_rest.py`.
 
 ### Role-Based Access Control (RBAC)
 

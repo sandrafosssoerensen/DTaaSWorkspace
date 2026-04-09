@@ -9,13 +9,9 @@ Keycloak instance.
 The Python script configures a Keycloak realm by:
 
 1. Requesting an admin token.
-2. Resolving the target client.
-3. Creating or reusing the `dtaas-shared` client scope.
-4. Creating the required protocol mappers.
-5. Ensuring the `profile` and `sub_legacy` user profile attributes exist.
-6. Assigning the shared scope to the target client.
-7. Updating each user's `profile` attribute without clobbering other
-   existing attributes (merge-safe).
+2. Resolving the target client UUID.
+3. Creating the required protocol mapper(s) directly on the client (default), or
+   on a named shared client scope when `KEYCLOAK_USE_SHARED_SCOPE=true` is set.
 
 ## Prerequisites
 
@@ -49,7 +45,6 @@ Then create the test realm and client:
 1. Open the administration console.
 2. Create realm `dtaas`.
 3. Create client `dtaas-workspace`.
-4. Create one or more users if you want to verify profile updates.
 
 ## Option 2: Test Against the Repository's DTaaS Keycloak Service
 
@@ -70,95 +65,60 @@ If you use the compose-based Keycloak, set the variables as follows:
   - `https://<SERVER_DNS>` (TLS with DNS)
 - `KEYCLOAK_CONTEXT_PATH` — the path prefix Keycloak is mounted at (e.g. `/auth`)
 
-For example:
-
 ## Run the Python Script
 
-From the repository root, set the required environment variables and run the
-script.
+From the repository root, load configuration from `.env` file and run the script:
 
-### Example for a local `start-dev` container
+### Command to run (with --env-file)
+
+```powershell
+cd workspaces/test/dtaas/keycloak
+python configure_keycloak_rest.py --env-file ../config/.env
+```
+
+Or from the repository root:
+
+```powershell
+python workspaces/test/dtaas/keycloak/configure_keycloak_rest.py --env-file workspaces/test/dtaas/config/.env
+```
+
+### Alternative: Direct environment variables (legacy)
+
+If you prefer to set environment variables directly instead of using an .env file:
 
 ```powershell
 $env:KEYCLOAK_BASE_URL = "http://localhost:18080"
 $env:KEYCLOAK_CONTEXT_PATH = "/"
 $env:KEYCLOAK_REALM = "dtaas"
 $env:KEYCLOAK_CLIENT_ID = "dtaas-workspace"
-$env:KEYCLOAK_SHARED_SCOPE_NAME = "dtaas-shared"
 $env:KEYCLOAK_ADMIN = "admin"
 $env:KEYCLOAK_ADMIN_PASSWORD = "admin"
-$env:PROFILE_BASE_URL = "https://localhost/gitlab"
 
 python workspaces/test/dtaas/keycloak/configure_keycloak_rest.py
-```
-
-### Example for a Keycloak instance exposed at `/auth`
-
-```powershell
-$env:KEYCLOAK_BASE_URL = "https://foo.com"
-$env:KEYCLOAK_CONTEXT_PATH = "/auth"
-$env:KEYCLOAK_REALM = "dtaas"
-$env:KEYCLOAK_CLIENT_ID = "dtaas-workspace"
-$env:KEYCLOAK_ADMIN = "admin"
-$env:KEYCLOAK_ADMIN_PASSWORD = "changeme"
-
-python workspaces/test/dtaas/keycloak/configure_keycloak_rest.py
-```
-
-Expected success output:
-
-```text
-Keycloak shared scope and mappers configured successfully (REST API).
 ```
 
 ## How to Verify the Result
 
 In the Keycloak admin console, verify the following.
 
-### Client Scope
+### Protocol Mappers (default mode)
 
-1. Open `Client scopes`.
-2. Confirm that `dtaas-shared` exists.
+1. Open `Clients` → `dtaas-workspace` → `Client scopes` tab.
+2. Click the dedicated client scope (named after the client) → `Mappers`.
+3. Confirm that `profile` exists with:
+   - User attribute: `profile`
+   - Add to userinfo: on
+   - Add to access token: off
 
-### Protocol Mappers
+### Client Scope Mappers (shared scope mode)
 
-Open the `dtaas-shared` scope and verify these mappers exist:
-
-1. `profile`
-2. `groups`
-3. `groups_owner`
-4. `sub_legacy`
-
-### User Profile Attributes
-
-Open realm user profile settings and verify these attributes exist:
-
-1. `profile`
-2. `sub_legacy`
-
-### Client Scope Assignment
-
-1. Open client `dtaas-workspace`.
-2. Check its default client scopes.
-3. Confirm `dtaas-shared` is assigned.
-
-### User Attribute Updates
-
-If users exist in the realm:
-
-1. Open a user.
-2. Check the user's attributes.
-3. Confirm `profile` is set to `<PROFILE_BASE_URL>/<username>`.
-4. Confirm any pre-existing attributes on the user are still present and unchanged.
-
-> **Note**: The script performs a merge — it reads existing attributes first and
-> only adds or overwrites `profile`. It does not replace the full attribute map.
-> Any custom attributes already set on a user (e.g. `department`, `team`) will
-> be preserved.
+1. Open `Client scopes` → `dtaas-shared` (or your configured scope name).
+2. Open its `Mappers` tab.
+3. Confirm that `profile` exists with the settings above.
+4. Open `Clients` → `dtaas-workspace` → `Client scopes` tab.
+5. Confirm `dtaas-shared` appears under default scopes.
 
 ## Run the Unit Tests Too
-
-The real-instance test checks live behavior. You should also run the unit tests:
 
 ```powershell
 python -m unittest discover -s workspaces/test/dtaas/keycloak -p "test_*.py"
@@ -173,22 +133,13 @@ It starts a disposable Keycloak container, creates:
 
 1. A test realm.
 2. A target client (public, direct-access grants enabled).
-3. A test user with a pre-existing custom attribute (`department`), a login password,
-   and membership in the `dtaas-users` group. The pre-existing attribute is there to
-   assert that `update_user_profiles` merges rather than replaces — it must survive
-   the script run unchanged.
+3. A test user with a pre-seeded `profile` attribute and a login password.
 4. A dedicated admin automation client (service account) with required roles.
 
 Then it runs `configure_keycloak_rest.py` using `client_credentials` and verifies:
 
-1. Required shared scope (`dtaas-shared`) exists.
-2. All four required mappers exist: `profile`, `groups`, `groups_owner`, `sub_legacy`.
-3. Shared scope is assigned to the target client as a default scope.
-4. Pre-existing user attributes (e.g. `department`) are preserved while `profile`
-   is set to `<PROFILE_BASE_URL>/<username>` — verifying merge safety.
-5. Access token contains `preferred_username`, `groups`, and the
-   `https://gitlab.org/claims/groups/owner` claim populated from the user's group.
-6. Userinfo endpoint returns `profile`, `preferred_username`, and `groups` claims.
+1. Required mapper (`profile`) is present on the target client.
+2. Userinfo endpoint returns the `profile` claim for the test user.
 
 Run it explicitly:
 
@@ -221,6 +172,12 @@ Check:
 
 Create the client first in the target realm, or set `KEYCLOAK_CLIENT_ID` to an
 existing client.
+
+### Shared scope mode issues
+
+If `KEYCLOAK_USE_SHARED_SCOPE=true`, the script uses
+`KEYCLOAK_SHARED_SCOPE_NAME` when provided and otherwise defaults to
+`dtaas-shared`.
 
 ### TLS or certificate failures
 

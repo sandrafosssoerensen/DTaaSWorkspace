@@ -127,50 +127,27 @@ Configured manually in Keycloak:
 
 ---
 
-## Custom Claims on Both Clients
+## Custom Claims
 
-The `dtaas-shared` Keycloak scope (configured by `configure_keycloak_rest.py`)
-is assigned to both clients
-and contributes the following claims. Note that not all claims appear in every
-token type — the mapper flags control this.
+The `configure_keycloak_rest.py` script configures a `profile` protocol mapper
+that can be placed either directly on the `dtaas-workspace` client (default)
+or on a shared client scope (when `KEYCLOAK_USE_SHARED_SCOPE=true`).
 
-**Access token** (`groups` and `groups_owner` mappers, `access.token.claim: true`):
-
-```json
-{
-  "preferred_username": "sandra",
-  "groups": ["dtaas-users"],
-  "https://gitlab": {
-    "org/claims/groups/owner": ["dtaas-users"]
-  }
-}
-```
-
-> **Note**: Keycloak splits claim names on `.` when building nested JWT objects,
-> so `https://gitlab.org/claims/groups/owner` becomes
-> `token["https://gitlab"]["org/claims/groups/owner"]` in the raw JWT.
-
-**Userinfo endpoint** (`profile`, `groups`, `groups_owner`, `sub_legacy` mappers,
-`userinfo.token.claim: true`):
+**Userinfo endpoint** (`profile` mapper, `userinfo.token.claim: true`):
 
 ```json
 {
   "preferred_username": "sandra",
-  "groups": ["dtaas-users"],
-  "https://gitlab": {
-    "org/claims/groups/owner": ["dtaas-users"]
-  },
-  "profile": "https://shared.dtaas-digitaltwin.com/gitlab/sandra",
-  "sub_legacy": "<legacy-sub-value>"
+  "profile": "https://shared.dtaas-digitaltwin.com/sandra"
 }
 ```
 
-> **Note**: `profile` and `sub_legacy` are userinfo-only — they are intentionally
-> excluded from the access token (`access.token.claim: false`).
+> **Note**: The `profile` claim is userinfo-only — it is intentionally excluded
+> from the access token (`access.token.claim: false`).
 
-The same scope should be assigned to `dtaas-client` in Keycloak so the React
-SPA also receives group membership claims and can obtain `profile` via the
-userinfo endpoint.
+Additional claims like `groups` are built-in Keycloak mappers and can be added
+to the client independently. The `groups_owner` and `sub_legacy` mappers are
+not currently configured by this script.
 
 ---
 

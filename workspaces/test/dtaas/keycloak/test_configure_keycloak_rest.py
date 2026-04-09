@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 from urllib.parse import parse_qs
 import unittest
 
@@ -27,7 +26,7 @@ class FakeConfigurator(KeycloakRestConfigurator):
     """Test double that records writes and returns canned API responses."""
 
     def __init__(self) -> None:
-        super().__init__(Settings())
+        super().__init__(Settings(keycloak_shared_scope_name="test-shared"))
         self.responses: dict[str, list[object]] = {}
         self.calls: list[tuple[str, str, object | None]] = []
 
@@ -35,7 +34,8 @@ class FakeConfigurator(KeycloakRestConfigurator):
         """Queue a canned response for the given URL."""
         self.responses.setdefault(url, []).append(payload)
 
-    def _request_json(  # type: ignore[override]  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def _request_json(  # type: ignore[override]
         self,
         url: str,
         method: str = "GET",
@@ -134,32 +134,12 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
         by_name = {mapper["name"]: mapper for mapper in MAPPERS}
 
         self.assertIn("profile", by_name)
-        self.assertIn("groups", by_name)
-        self.assertIn("groups_owner", by_name)
-        self.assertIn("sub_legacy", by_name)
-
-        groups_cfg = by_name["groups"]["config"]
-        self.assertEqual(groups_cfg.get("claim.name"), "groups")
-        self.assertEqual(groups_cfg.get("access.token.claim"), "true")
-        self.assertEqual(groups_cfg.get("userinfo.token.claim"), "true")
-
-        owners_cfg = by_name["groups_owner"]["config"]
-        self.assertEqual(
-            owners_cfg.get("claim.name"),
-            "https://gitlab.org/claims/groups/owner",
-        )
-        self.assertEqual(owners_cfg.get("access.token.claim"), "true")
-        self.assertEqual(owners_cfg.get("userinfo.token.claim"), "true")
+        self.assertEqual(set(by_name), {"profile"})
 
         profile_cfg = by_name["profile"]["config"]
         self.assertEqual(profile_cfg.get("claim.name"), "profile")
         self.assertEqual(profile_cfg.get("access.token.claim"), "false")
         self.assertEqual(profile_cfg.get("userinfo.token.claim"), "true")
-
-        legacy_cfg = by_name["sub_legacy"]["config"]
-        self.assertEqual(legacy_cfg.get("claim.name"), "sub_legacy")
-        self.assertEqual(legacy_cfg.get("access.token.claim"), "false")
-        self.assertEqual(legacy_cfg.get("userinfo.token.claim"), "true")
 
     def test_get_access_token_uses_client_credentials_if_configured(self) -> None:
         """Client credentials grant is used when client ID and secret are set."""
@@ -200,37 +180,43 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
         put_calls = [call for call in self.config.calls if call[0] == "PUT"]
         self.assertEqual(put_calls, [])
 
-    def test_update_user_profiles_updates_valid_users(self) -> None:
-        """Valid users get a profile URL; users with missing id or username are skipped."""
-        self.config.settings = Settings(profile_base_url="https://localhost/gitlab")
-        users_url = f"{self.admin_url}/{self.realm}/users?first=0&max=200"
-        user_details_url = f"{self.admin_url}/{self.realm}/users/u-1"
-        self.config.push(
-            users_url,
-            [
-                {"id": "u-1", "username": "alice"},
-                {"id": "", "username": "missing-id"},
-                {"id": "u-3", "username": ""},
-            ],
+    def test_ensure_mapper_on_client_creates_new_mapper(self) -> None:
+        """Mapper is created directly on the client when none exists."""
+        endpoint = (
+            f"{self.admin_url}/{self.realm}/clients/client-1"
+            "/protocol-mappers/models"
         )
-        self.config.push(user_details_url, {"attributes": {"department": ["eng"]}})
-        self.config.push(user_details_url, {})
+        self.config.push(endpoint, [])
 
-        self.config.update_user_profiles("token")
+        self.config.ensure_mapper_on_client("token", "client-1", {"name": "profile"})
 
-        user_puts = [
-            call
+        post_call = any(
+            call[0] == "POST" and call[1] == endpoint
             for call in self.config.calls
-            if call[0] == "PUT" and call[1].endswith("/users/u-1")
-        ]
-        self.assertEqual(len(user_puts), 1)
-        put_body = json.loads(user_puts[0][2].decode("utf-8"))
-        self.assertEqual(put_body["attributes"]["department"], ["eng"])
-        self.assertEqual(
-            put_body["attributes"]["profile"],
-            ["https://localhost/gitlab/alice"],
         )
+        self.assertTrue(post_call)
 
+    def test_ensure_mapper_on_client_updates_existing_mapper(self) -> None:
+        """Existing client mapper is updated in-place rather than duplicated."""
+        endpoint = (
+            f"{self.admin_url}/{self.realm}/clients/client-1"
+            "/protocol-mappers/models"
+        )
+        self.config.push(endpoint, [{"name": "profile", "id": "mapper-2"}])
+        self.config.push(f"{endpoint}/mapper-2", {})
+
+        self.config.ensure_mapper_on_client("token", "client-1", {"name": "profile"})
+
+        put_call = any(
+            call[0] == "PUT" and call[1] == f"{endpoint}/mapper-2"
+            for call in self.config.calls
+        )
+        created = any(
+            call[0] == "POST" and call[1] == endpoint
+            for call in self.config.calls
+        )
+        self.assertTrue(put_call)
+        self.assertFalse(created)
 
 if __name__ == "__main__":
     unittest.main()
