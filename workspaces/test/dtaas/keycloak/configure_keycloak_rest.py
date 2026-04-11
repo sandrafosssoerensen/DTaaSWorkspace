@@ -63,7 +63,7 @@ CLIENT_MAPPERS: list[dict[str, Any]] = [
             # Use included.custom.audience (a literal string) rather than
             # included.client.audience, which silently does nothing for public
             # clients that are not resource servers.
-            "included.custom.audience": "dtaas-client",
+            "included.custom.audience": "",
             "id.token.claim": "false",
             "access.token.claim": "true",
         },
@@ -166,7 +166,6 @@ class KeycloakRestConfigurator:
         token = self.get_access_token()
         client_uuid = self.get_client_uuid(token)
         self.ensure_client_auth_settings(token, client_uuid)
-        self.ensure_client_scopes(token, client_uuid)
         if self.settings.keycloak_use_shared_scope:
             scope_id = self.get_or_create_scope_id(token)
             for mapper in MAPPERS:
@@ -175,6 +174,7 @@ class KeycloakRestConfigurator:
         else:
             for mapper in MAPPERS:
                 self.ensure_mapper_on_client(token, client_uuid, mapper)
+        self.ensure_client_scopes(token, client_uuid)
 
         for mapper in self._client_mappers():
             self.ensure_mapper_on_client(token, client_uuid, mapper)
@@ -298,10 +298,12 @@ class KeycloakRestConfigurator:
         for name in desired_scope_names:
             scope_id = all_scopes_by_name.get(name)
             if not scope_id:
-                raise RuntimeError(
-                    f"Client scope '{name}' was not found in realm "
-                    f"{self.settings.keycloak_realm}"
+                print(
+                    f"Warning: client scope '{name}' not found in realm "
+                    f"{self.settings.keycloak_realm} — skipping",
+                    file=sys.stderr,
                 )
+                continue
             desired_ids.add(scope_id)
 
         endpoint = (

@@ -20,13 +20,13 @@
   authorizer:
     handler: remote_json
     config:
-      remote: http://opa:8181/v1/data/workspace/authz/allow
+      remote: http://opa:8181/v0/data/workspace/authz/allow
       payload: |
         {
           "input": {
             "subject": "{{ .Subject }}",
             "extra": {{ .Extra | toJson }},
-            "url": {{ .MatchContext.URL | toJson }},
+            "url": {"path": "{{ .MatchContext.URL.Path }}"},
             "method": "{{ .MatchContext.Method }}"
           }
         }
