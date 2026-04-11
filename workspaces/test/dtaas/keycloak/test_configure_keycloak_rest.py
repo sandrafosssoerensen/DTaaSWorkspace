@@ -133,13 +133,17 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
         """Validate claim names and emission targets used by mapper definitions."""
         by_name = {mapper["name"]: mapper for mapper in MAPPERS}
 
-        self.assertIn("profile", by_name)
-        self.assertEqual(set(by_name), {"profile"})
+        self.assertEqual(set(by_name), {"profile", "groups"})
 
         profile_cfg = by_name["profile"]["config"]
         self.assertEqual(profile_cfg.get("claim.name"), "profile")
         self.assertEqual(profile_cfg.get("access.token.claim"), "false")
         self.assertEqual(profile_cfg.get("userinfo.token.claim"), "true")
+
+        groups_cfg = by_name["groups"]["config"]
+        self.assertEqual(groups_cfg.get("claim.name"), "groups")
+        self.assertEqual(groups_cfg.get("access.token.claim"), "true")
+        self.assertEqual(groups_cfg.get("userinfo.token.claim"), "true")
 
     def test_get_access_token_uses_client_credentials_if_configured(self) -> None:
         """Client credentials grant is used when client ID and secret are set."""
@@ -217,6 +221,7 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
         )
         self.assertTrue(put_call)
         self.assertFalse(created)
+
 
 if __name__ == "__main__":
     unittest.main()
