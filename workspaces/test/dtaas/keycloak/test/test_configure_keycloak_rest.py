@@ -1,32 +1,27 @@
-"""Unit tests for the Python Keycloak REST configurator."""
-# pylint: disable=duplicate-code
+"""Unit tests for the Keycloak REST configurator package."""
 
 from __future__ import annotations
 
 from urllib.parse import parse_qs
 import unittest
 
-try:
-    from workspaces.test.dtaas.keycloak.configure_keycloak_rest import (
-        KeycloakRestConfigurator,
-        MAPPERS,
-        Settings,
-        normalize_path,
-    )
-except ImportError:
-    from configure_keycloak_rest import (
-        KeycloakRestConfigurator,
-        MAPPERS,
-        Settings,
-        normalize_path,
-    )
+from workspaces.test.dtaas.keycloak.src.keycloak_rest.configurator import (
+    KeycloakRestConfigurator,
+)
+from workspaces.test.dtaas.keycloak.src.keycloak_rest.constants import MAPPERS
+from workspaces.test.dtaas.keycloak.src.keycloak_rest.http_client import HttpClient
+from workspaces.test.dtaas.keycloak.src.keycloak_rest.settings import (
+    AdminAuth,
+    RealmConfig,
+    Settings,
+    normalize_path,
+)
 
 
-class FakeConfigurator(KeycloakRestConfigurator):
-    """Test double that records writes and returns canned API responses."""
+class FakeHttpClient(HttpClient):
+    """Test double that records calls and returns queued responses."""
 
     def __init__(self) -> None:
-        super().__init__(Settings(keycloak_shared_scope_name="test-shared"))
         self.responses: dict[str, list[object]] = {}
         self.calls: list[tuple[str, str, object | None]] = []
 
@@ -34,21 +29,46 @@ class FakeConfigurator(KeycloakRestConfigurator):
         """Queue a canned response for the given URL."""
         self.responses.setdefault(url, []).append(payload)
 
-    # pylint: disable=too-many-arguments,too-many-positional-arguments
-    def _request_json(  # type: ignore[override]
+    def request_json(
         self,
         url: str,
         method: str = "GET",
         data: bytes | None = None,
-        content_type: str = "application/json",
-        token: str | None = None,
+        **_: object,
     ) -> object:
         """Record the call and return the next queued response."""
         self.calls.append((method, url, data))
         queue = self.responses.get(url, [])
-        if queue:
-            return queue.pop(0)
-        return []
+        return queue.pop(0) if queue else []
+
+    def request_empty(  # type: ignore[override]
+        self,
+        url: str,
+        method: str,
+        *_args: object,
+        json_data: dict[str, object] | None = None,
+        **_kwargs: object,
+    ) -> None:
+        """Record empty-body operations without real HTTP calls."""
+        self.calls.append((method, url, json_data))
+
+
+class FakeConfigurator(KeycloakRestConfigurator):
+    """Configurator wired with a FakeHttpClient for unit testing."""
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.fake_http = FakeHttpClient()
+        effective = settings or Settings(realm=RealmConfig(shared_scope_name="test-shared"))
+        super().__init__(effective, self.fake_http)
+
+    def push(self, url: str, payload: object) -> None:
+        """Queue a canned response for the given URL."""
+        self.fake_http.push(url, payload)
+
+    @property
+    def calls(self) -> list[tuple[str, str, object | None]]:
+        """Recorded HTTP calls from the fake client."""
+        return self.fake_http.calls
 
 
 class NormalizePathTests(unittest.TestCase):
@@ -60,22 +80,22 @@ class NormalizePathTests(unittest.TestCase):
         self.assertEqual(normalize_path("/"), "")
 
     def test_normalize_path_trailing_slash(self) -> None:
-        """Trailing slashes should be stripped; non-slash paths stay unchanged."""
+        """Trailing slashes should be stripped; other paths unchanged."""
         self.assertEqual(normalize_path("/auth/"), "/auth")
         self.assertEqual(normalize_path("/auth"), "/auth")
 
 
 class ConfiguratorBehaviorTests(unittest.TestCase):
-    """Behavioural unit tests for KeycloakRestConfigurator via FakeConfigurator."""
+    """Behavioral unit tests for KeycloakRestConfigurator."""
 
     def setUp(self) -> None:
         self.config = FakeConfigurator()
-        self.realm = self.config.settings.keycloak_realm
+        self.realm = self.config.settings.realm.name
         self.admin_url = self.config.admin_url
 
     def test_get_or_create_scope_id_reuses_existing(self) -> None:
         """Existing scope is reused without creating a new one."""
-        name = self.config.settings.keycloak_shared_scope_name
+        name = self.config.settings.realm.shared_scope_name
         url = f"{self.admin_url}/{self.realm}/client-scopes?q={name}"
         self.config.push(url, [{"name": name, "id": "scope-1"}])
 
@@ -90,20 +110,18 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
 
     def test_get_or_create_scope_id_creates_when_missing(self) -> None:
         """Scope is created via POST when not already present."""
-        name = self.config.settings.keycloak_shared_scope_name
+        name = self.config.settings.realm.shared_scope_name
         query_url = f"{self.admin_url}/{self.realm}/client-scopes?q={name}"
         create_url = f"{self.admin_url}/{self.realm}/client-scopes"
 
         self.config.push(query_url, [])
-        self.config.push(create_url, {})
         self.config.push(query_url, [{"name": name, "id": "scope-2"}])
 
         scope_id = self.config.get_or_create_scope_id("token")
 
         self.assertEqual(scope_id, "scope-2")
         created_scope = any(
-            call[0] == "POST" and call[1] == create_url
-            for call in self.config.calls
+            call[0] == "POST" and call[1] == create_url for call in self.config.calls
         )
         self.assertTrue(created_scope)
 
@@ -114,7 +132,6 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
             "/protocol-mappers/models"
         )
         self.config.push(endpoint, [{"name": "profile", "id": "mapper-1"}])
-        self.config.push(f"{endpoint}/mapper-1", {})
 
         self.config.ensure_mapper("token", "scope-1", {"name": "profile"})
 
@@ -123,8 +140,7 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
             for call in self.config.calls
         )
         created_mapper = any(
-            call[0] == "POST" and call[1] == endpoint
-            for call in self.config.calls
+            call[0] == "POST" and call[1] == endpoint for call in self.config.calls
         )
         self.assertTrue(updated_mapper)
         self.assertFalse(created_mapper)
@@ -147,36 +163,29 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
 
     def test_get_access_token_uses_client_credentials_if_configured(self) -> None:
         """Client credentials grant is used when client ID and secret are set."""
-        configured = FakeConfigurator()
-        configured.settings = Settings(
-            keycloak_admin_client_id="admin-client",
-            keycloak_admin_client_secret="admin-secret",
+        configured = FakeConfigurator(
+            Settings(
+                admin=AdminAuth(
+                    client_id="admin-client",
+                    client_secret="admin-secret",
+                )
+            )
         )
-        configured.server_url = (
-            f"{configured.settings.keycloak_base_url}"
-            f"{normalize_path(configured.settings.keycloak_context_path)}"
-        )
-
-        token_url = (
-            f"{configured.server_url}/realms/master/protocol/openid-connect/token"
-        )
+        token_url = f"{configured.server_url}/realms/master/protocol/openid-connect/token"
         configured.push(token_url, {"access_token": "tok"})
 
         token = configured.get_access_token()
 
         self.assertEqual(token, "tok")
         post_call = next(call for call in configured.calls if call[1] == token_url)
-        encoded = post_call[2].decode("utf-8")
-        parsed = parse_qs(encoded)
+        parsed = parse_qs(post_call[2].decode("utf-8"))
         self.assertEqual(parsed.get("grant_type"), ["client_credentials"])
         self.assertEqual(parsed.get("client_id"), ["admin-client"])
         self.assertEqual(parsed.get("client_secret"), ["admin-secret"])
 
     def test_ensure_scope_assigned_is_noop_if_already_assigned(self) -> None:
         """Scope assignment is skipped if the scope is already present."""
-        url = (
-            f"{self.admin_url}/{self.realm}/clients/client-1/default-client-scopes"
-        )
+        url = f"{self.admin_url}/{self.realm}/clients/client-1/default-client-scopes"
         self.config.push(url, [{"id": "scope-1"}])
 
         self.config.ensure_scope_assigned("token", "client-1", "scope-1")
@@ -195,8 +204,7 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
         self.config.ensure_mapper_on_client("token", "client-1", {"name": "profile"})
 
         post_call = any(
-            call[0] == "POST" and call[1] == endpoint
-            for call in self.config.calls
+            call[0] == "POST" and call[1] == endpoint for call in self.config.calls
         )
         self.assertTrue(post_call)
 
@@ -207,7 +215,6 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
             "/protocol-mappers/models"
         )
         self.config.push(endpoint, [{"name": "profile", "id": "mapper-2"}])
-        self.config.push(f"{endpoint}/mapper-2", {})
 
         self.config.ensure_mapper_on_client("token", "client-1", {"name": "profile"})
 
@@ -216,8 +223,7 @@ class ConfiguratorBehaviorTests(unittest.TestCase):
             for call in self.config.calls
         )
         created = any(
-            call[0] == "POST" and call[1] == endpoint
-            for call in self.config.calls
+            call[0] == "POST" and call[1] == endpoint for call in self.config.calls
         )
         self.assertTrue(put_call)
         self.assertFalse(created)

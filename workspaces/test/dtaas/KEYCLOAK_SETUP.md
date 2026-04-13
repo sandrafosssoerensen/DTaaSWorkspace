@@ -263,9 +263,10 @@ The script creates (or reuses) the following protocol mapper:
 |--------|-----------|:---:|:---:|
 | `profile` | `profile` | — | ✓ |
 
-By default, the mapper is placed directly on the `dtaas-workspace` client. Optionally,
-you can enable `KEYCLOAK_USE_SHARED_SCOPE=true` to place it on a shared client scope
-instead (see `.env.example` for configuration).
+By default (`KEYCLOAK_USE_SHARED_SCOPE=false`), the mapper is placed directly on the
+`dtaas-workspace` client. Set `KEYCLOAK_USE_SHARED_SCOPE=true` to place it on a shared
+client scope instead — recommended for multi-client setups
+(see `.env.example` for configuration).
 
 The script also sets each user's `profile` attribute to `<PROFILE_BASE_URL>/<username>`
 (if `KEYCLOAK_PROFILE_BASE_URL` and `KEYCLOAK_USER_PROFILES` are configured).

@@ -62,4 +62,4 @@ jobs:
           KEYCLOAK_INTEGRATION_TIMEOUT: "420"
         run: |
           python -m unittest \
-            workspaces.test.dtaas.keycloak.test_integration_keycloak_rest
+            workspaces.test.dtaas.keycloak.test.test_integration_keycloak_rest

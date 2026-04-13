@@ -131,7 +131,7 @@ Configured manually in Keycloak:
 
 The `configure_keycloak_rest.py` script configures a `profile` protocol mapper
 that can be placed either directly on the `dtaas-workspace` client (default)
-or on a shared client scope (when `KEYCLOAK_USE_SHARED_SCOPE=true`).
+or on a shared client scope (when `KEYCLOAK_USE_SHARED_SCOPE=true`; default is `false`).
 
 **Userinfo endpoint** (`profile` mapper, `userinfo.token.claim: true`):
 

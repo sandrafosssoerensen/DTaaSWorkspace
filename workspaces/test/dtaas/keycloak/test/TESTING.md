@@ -1,8 +1,27 @@
 # Testing the Python Keycloak Configurator
 
-This guide explains how to test
-`workspaces/test/dtaas/keycloak/configure_keycloak_rest.py` against a real
+This guide explains how to test the modular Keycloak REST configurator against a real
 Keycloak instance.
+
+## Module Structure
+
+The Keycloak configurator is organized into two main packages:
+
+- **`src/keycloak_rest/`**:
+  - `cli.py` — Command-line interface
+  - `configurator.py` — Main workflow orchestration
+  - `user_profiles.py` — User profile attribute helpers and `AdminContext`
+  - `settings.py` — Configuration parsing
+  - `http_client.py` — HTTP request handling
+  - `dotenv.py` — Environment file handling
+  - `constants.py` — Static definitions (mappers, pagination)
+
+- **`test/`** — Test modules:
+  - `test_configure_keycloak_rest.py` — Unit tests
+  - `test_integration_keycloak_rest.py` — Integration tests
+  - `integration_helpers.py` — Helper utilities
+  - `integration_setup.py` — Setup helpers
+  - `container_helpers.py` — Docker lifecycle helpers
 
 ## What This Tests
 
@@ -10,8 +29,9 @@ The Python script configures a Keycloak realm by:
 
 1. Requesting an admin token.
 2. Resolving the target client UUID.
-3. Creating the required protocol mapper(s) directly on the client (default), or
-   on a named shared client scope when `KEYCLOAK_USE_SHARED_SCOPE=true` is set.
+3. Creating the required protocol mapper(s) directly on the client
+   (`KEYCLOAK_USE_SHARED_SCOPE=false`, the default), or on a named shared client
+   scope when `KEYCLOAK_USE_SHARED_SCOPE=true` is set.
 
 ## Prerequisites
 
@@ -65,24 +85,24 @@ If you use the compose-based Keycloak, set the variables as follows:
   - `https://<SERVER_DNS>` (TLS with DNS)
 - `KEYCLOAK_CONTEXT_PATH` — the path prefix Keycloak is mounted at (e.g. `/auth`)
 
-## Run the Python Script
+## Run the Python Module
 
-From the repository root, load configuration from `.env` file and run the script:
+From the repository root, load configuration from `.env` file and run the configurator module:
 
 ### Command to run (with --env-file)
 
 ```powershell
 cd workspaces/test/dtaas/keycloak
-python configure_keycloak_rest.py --env-file ../config/.env
+python -m src.keycloak_rest --env-file ../config/.env
 ```
 
 Or from the repository root:
 
 ```powershell
-python workspaces/test/dtaas/keycloak/configure_keycloak_rest.py --env-file workspaces/test/dtaas/config/.env
+python -m workspaces.test.dtaas.keycloak.src.keycloak_rest --env-file workspaces/test/dtaas/config/.env
 ```
 
-### Alternative: Direct environment variables (legacy)
+### Alternative: Direct environment variables
 
 If you prefer to set environment variables directly instead of using an .env file:
 
@@ -94,7 +114,7 @@ $env:KEYCLOAK_CLIENT_ID = "dtaas-workspace"
 $env:KEYCLOAK_ADMIN = "admin"
 $env:KEYCLOAK_ADMIN_PASSWORD = "admin"
 
-python workspaces/test/dtaas/keycloak/configure_keycloak_rest.py
+python -m workspaces.test.dtaas.keycloak.src.keycloak_rest
 ```
 
 ## How to Verify the Result
@@ -118,16 +138,16 @@ In the Keycloak admin console, verify the following.
 4. Open `Clients` → `dtaas-workspace` → `Client scopes` tab.
 5. Confirm `dtaas-shared` appears under default scopes.
 
-## Run the Unit Tests Too
+## Run the Unit Tests
 
 ```powershell
-python -m unittest discover -s workspaces/test/dtaas/keycloak -p "test_*.py"
+python -m unittest workspaces.test.dtaas.keycloak.test.test_configure_keycloak_rest -v
 ```
 
 ## Run the Integration Test (Real Keycloak)
 
 The integration test lives in
-`workspaces/test/dtaas/keycloak/test_integration_keycloak_rest.py`.
+`workspaces/test/dtaas/keycloak/test/test_integration_keycloak_rest.py`.
 
 It starts a disposable Keycloak container, creates:
 
@@ -136,7 +156,7 @@ It starts a disposable Keycloak container, creates:
 3. A test user with a pre-seeded `profile` attribute and a login password.
 4. A dedicated admin automation client (service account) with required roles.
 
-Then it runs `configure_keycloak_rest.py` using `client_credentials` and verifies:
+Then it runs the configurator module using `client_credentials` and verifies:
 
 1. Required mapper (`profile`) is present on the target client.
 2. Userinfo endpoint returns the `profile` claim for the test user.
@@ -145,7 +165,7 @@ Run it explicitly:
 
 ```powershell
 $env:RUN_KEYCLOAK_INTEGRATION = "1"
-py -m unittest workspaces.test.dtaas.keycloak.test_integration_keycloak_rest
+py -m unittest workspaces.test.dtaas.keycloak.test.test_integration_keycloak_rest
 ```
 
 Optional custom port:
@@ -175,9 +195,10 @@ existing client.
 
 ### Shared scope mode issues
 
-If `KEYCLOAK_USE_SHARED_SCOPE=true`, the script uses
-`KEYCLOAK_SHARED_SCOPE_NAME` when provided and otherwise defaults to
-`dtaas-shared`.
+If `KEYCLOAK_USE_SHARED_SCOPE=true`, the script places mappers on a shared
+client scope; `KEYCLOAK_SHARED_SCOPE_NAME` controls the scope name and
+defaults to `dtaas-shared`. When unset or `false` (the default), mappers are
+placed directly on the client.
 
 ### TLS or certificate failures
 
