@@ -1,6 +1,7 @@
 # DTaaS Oathkeeper access rules.
-# The remote_json authorizer config (remote URL, payload) is defined centrally
-# in oathkeeper.yml under authorizers.remote_json.config — no per-rule overrides.
+# Oathkeeper is responsible for JWT validation only (authentication).
+# Authorization (RBAC) is handled by OPA, linked to the workspace nginx —
+# Oathkeeper and OPA are decoupled.
 
 # Rule 1: Health check — no authentication required.
 - id: dtaas-public-health
@@ -19,17 +20,15 @@
   mutators:
     - handler: noop
 
-# Rule 2: Workspace user paths — require valid JWT + OPA RBAC.
-# Roles are enforced by policy.rego via OPA:
-#   admins  → access any workspace path (cross-user)
-#   users   → access only their own workspace (all methods)
-#   viewers → read-only access to their own workspace (GET/HEAD/OPTIONS)
+# Rule 2: Workspace user paths — require valid Keycloak JWT.
+# Oathkeeper validates the JWT signature, issuer, audience, and expiry.
+# Fine-grained RBAC (which user can access which workspace) is enforced
+# separately by OPA via the workspace nginx.
 - id: dtaas-workspace-jwt-enforcement
   version: "v0.36.0-beta.1"
   description: >
-    Requires a valid Keycloak-issued JWT. RBAC is enforced by OPA policy:
-    admins can access any workspace, users access their own, viewers are
-    read-only on their own workspace.
+    Requires a valid Keycloak-issued JWT. Oathkeeper validates the token
+    and injects user identity headers. RBAC is handled downstream by OPA.
   match:
     url: "<.*>"
     methods:
@@ -43,6 +42,6 @@
   authenticators:
     - handler: jwt
   authorizer:
-    handler: remote_json
+    handler: allow
   mutators:
     - handler: header

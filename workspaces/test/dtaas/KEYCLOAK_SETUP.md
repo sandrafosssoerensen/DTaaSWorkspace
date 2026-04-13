@@ -1,8 +1,8 @@
 # Keycloak Setup Guide for DTaaS
 
 This guide explains how to configure Keycloak as the identity provider for the
-DTaaS workspace deployment. Authorization is enforced by Oathkeeper + OPA using
-Keycloak realm roles (RBAC).
+DTaaS workspace deployment. Oathkeeper uses Keycloak-issued JWTs for gateway
+authentication.
 
 ## Architecture
 
@@ -19,7 +19,9 @@ Browser  ──PKCE login──►  Keycloak (realm: dtaas, client: dtaas-worksp
                      Traefik ForwardAuth
                                │
                           Oathkeeper
-                           (validates JWT, calls OPA via opa-proxy)
+                           (validates JWT)
+
+Workspace-side authorization with OPA is decoupled from Oathkeeper.
 ```
 
 ## Prerequisites

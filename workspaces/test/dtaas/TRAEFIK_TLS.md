@@ -1,7 +1,7 @@
 # Workspace with Traefik, Oathkeeper, and TLS
 
 This guide explains how to deploy the workspace container with Traefik reverse
-proxy, Oathkeeper JWT/OPA authorization, and TLS/HTTPS support for secure multi-user
+proxy, Oathkeeper JWT authentication, and TLS/HTTPS support for secure multi-user
 deployments.
 
 ## ❓ Prerequisites
@@ -20,8 +20,7 @@ The `compose.traefik.secure.tls.yml` file provides a production-ready setup with
 - **Traefik** reverse proxy with TLS termination (ports 80, 443) and HTTP→HTTPS redirect
 - **Keycloak** identity provider with OIDC/PKCE support
 - **Ory Oathkeeper** for JWT verification and auth decisioning
-- **opa-proxy** nginx adapter that converts OPA's 404 deny response to 403
-- **OPA** for RBAC path authorization (roles: `dtaas-admin`, `dtaas-user`, `dtaas-viewer`)
+- **OPA** available for workspace-side authorization integration
 - **user1**, **user2**, **admin** workspaces behind authentication
 - **Two Docker networks**: `dtaas-frontend` and `dtaas-users`
 
@@ -64,7 +63,7 @@ This will:
 
 1. Start Traefik reverse proxy with TLS on ports 80 (HTTP → HTTPS redirect)
    and 443 (HTTPS)
-2. Start Oathkeeper and OPA authorization services
+2. Start Oathkeeper authentication service (and OPA service for workspace-side integration)
 3. Start workspace instances for user1 and user2, protected by
    authentication
 
@@ -137,22 +136,20 @@ The endpoint values are dynamically populated with the user's username from the
   2. Uncomment the dashboard labels in `compose.traefik.secure.tls.yml`.
   3. Access `https://yourdomain.com/dashboard/`.
 
-## 🔒 Authorization Flow
+## 🔒 Authentication Flow
 
 1. Browser sends workspace request with `dtaas_access_token` cookie (set by the
    DTaaS React SPA after PKCE login).
 2. Traefik forwards the request to Oathkeeper's ForwardAuth decision API.
 3. Oathkeeper reads the JWT from the cookie; validates signature (RS256/384/512),
    issuer, audience, and expiry against Keycloak's JWKS endpoint.
-4. Oathkeeper posts the request context to opa-proxy, which forwards it to OPA
-   using the v0 data API (raw JSON input, no `{"input": ...}` wrapper).
-5. OPA evaluates `policy.rego` (RBAC: role vs path match) and returns HTTP 200
-   (allow) or HTTP 404 (undefined/deny).
-6. opa-proxy passes through 200 and converts 404 → 403.
-7. Oathkeeper receives 200 → allow (injects identity headers); 403 → 403 Forbidden
-   to client.
+4. Oathkeeper validates JWT signature, issuer, audience, and expiry.
+5. Oathkeeper injects identity headers and returns allow to Traefik.
+6. Traefik forwards request to workspace service.
 
-## ✅ PKCE + Oathkeeper + OPA Verification Checklist
+In the current decoupled setup, Oathkeeper does not call OPA during ForwardAuth.
+
+## ✅ PKCE + Oathkeeper Verification Checklist
 
 Run this checklist after deployment to confirm secure authentication and
 authorization behavior.
@@ -164,12 +161,12 @@ authorization behavior.
 3. Verify login uses Keycloak PKCE flow in browser (no password grant from the client).
 4. After login, confirm workspace access with own path succeeds:
   `https://<SERVER_DNS>/<USERNAME1>/`
-5. Confirm cross-user access is denied:
-  log in as `USERNAME1` and request `https://<SERVER_DNS>/<USERNAME2>/`
+5. Confirm authenticated requests are forwarded to workspace routes.
+  Cross-user path RBAC is not enforced at gateway level in decoupled mode.
 6. Validate JWT checks in Oathkeeper logs (issuer, signature, audience):
   `docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml logs oathkeeper`
-7. Validate OPA authorization decisions and opa-proxy conversions:
-  `docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml logs opa opa-proxy`
+7. Validate Oathkeeper authentication decisions:
+  `docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml logs oathkeeper`
 8. Confirm token claims include `preferred_username` and `roles` (realm roles array).
 9. Ensure Traefik insecure API is not enabled in compose configuration.
 
@@ -264,9 +261,8 @@ for JWKS URL, trusted issuer, and target audience in the compose file.
 - Verify the `dtaas_access_token` cookie is being sent (set by the DTaaS SPA after login)
 - Check `KEYCLOAK_ISSUER_URL`, `KEYCLOAK_JWKS_URL`, and `KEYCLOAK_TARGET_AUDIENCE`
 - Verify the token contains `preferred_username` and `roles` (run `configure_keycloak_rest.py` if mappers are missing)
-- Check OPA policy decisions: `docker compose logs opa`
-- Check opa-proxy status conversions: `docker compose logs opa-proxy`
 - Check Oathkeeper decisions: `docker compose logs oathkeeper`
+- Check OPA service status (if using workspace-side integration): `docker compose logs opa`
 
 ### Service Access Issues
 
@@ -280,7 +276,7 @@ for JWKS URL, trusted issuer, and target audience in the compose file.
 - Verify Traefik routes:
   `docker compose -f compose.traefik.secure.tls.yml logs traefik`
 - Test Oathkeeper/OPA services:
-  `docker compose -f compose.traefik.secure.tls.yml logs oathkeeper opa-proxy opa`
+  `docker compose -f compose.traefik.secure.tls.yml logs oathkeeper opa`
 
 ### Port Conflicts
 

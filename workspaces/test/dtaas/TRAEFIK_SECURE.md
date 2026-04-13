@@ -1,8 +1,8 @@
 # Workspace with Traefik, Oathkeeper, and Keycloak Security
 
-This guide explains how to use the workspace container with Traefik reverse proxy,
-JWT authentication via Ory Oathkeeper, and policy authorization via OPA for secure
-multi-user deployments in the DTaaS installation.
+This guide explains how to use the workspace container with Traefik reverse proxy
+and JWT authentication via Ory Oathkeeper for secure multi-user deployments in
+the DTaaS installation.
 
 ## ❓ Prerequisites
 
@@ -17,8 +17,7 @@ The `compose.traefik.secure.yml` file sets up:
 - **Traefik** reverse proxy on port 80
 - **Keycloak** identity provider with OIDC support
 - **Ory Oathkeeper** for JWT verification and auth decisioning
-- **opa-proxy** nginx adapter that converts OPA's 404 deny response to 403
-- **OPA (Open Policy Agent)** for RBAC path authorization (roles: dtaas-admin, dtaas-user, dtaas-viewer)
+- **OPA (Open Policy Agent)** available for workspace-side authorization integration
 - **client** — DTaaS web interface
 - **user1**, **user2**, **admin** workspaces
 - Two Docker networks: `dtaas-frontend` and `dtaas-users`
@@ -65,7 +64,7 @@ This will:
 
 1. Start the Traefik reverse proxy on port 80
 2. Start Keycloak identity provider at `/auth`
-3. Start Oathkeeper and OPA authorization services
+3. Start Oathkeeper authentication service (and OPA service for workspace-side integration)
 4. Start the DTaaS web client interface
 5. Start workspace instances for both users
 
@@ -337,8 +336,7 @@ If you're stuck in an authentication loop:
 1. Clear browser cookies for localhost
 2. Ensure `KEYCLOAK_ISSUER_URL` and `KEYCLOAK_JWKS_URL` are correct
 3. Check Oathkeeper logs for JWT validation errors
-4. Check OPA logs for authorization decisions
-5. Check opa-proxy logs for unexpected status codes
+4. Check Oathkeeper logs for JWT validation decisions
 
 ### Services Not Accessible
 
@@ -352,9 +350,9 @@ If you're stuck in an authentication loop:
    docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml logs traefik
    ```
 
-3. Check Oathkeeper, opa-proxy, and OPA logs:
+3. Check Oathkeeper and OPA logs:
    ```bash
-   docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml logs oathkeeper opa-proxy opa
+  docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml logs oathkeeper opa
    ```
 
 ### OIDC/OAuth Errors

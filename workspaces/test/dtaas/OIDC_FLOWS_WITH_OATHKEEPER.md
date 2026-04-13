@@ -1,132 +1,87 @@
 # OIDC Flows in DTaaS with Oathkeeper
 
-This document describes the current authentication and authorization flows
-after introducing Oathkeeper as a Policy Enforcement Point (PEP) in front
-of workspace routes.
+This document describes the current DTaaS flow where Oathkeeper and OPA are
+decoupled:
 
-## High-Level Architecture
+- Oathkeeper handles gateway JWT authentication for Traefik routes.
+- OPA is reserved for workspace-side authorization integration.
 
-```text
-Browser
-  │
-  ├── React SPA (PKCE login) ──────────────────────────► Keycloak
-  │       sets dtaas_access_token cookie
-  │
-  └── Workspace request (cookie)
-        │
-        ▼
-      Traefik
-        │ ForwardAuth
-        ▼
-      Oathkeeper
-        │ reads dtaas_access_token cookie
-        │ verifies JWT (signature, issuer, audience, expiry)
-        │ checks Keycloak JWKS
-        │
-        ▼
-      opa-proxy (nginx 404→403 adapter)
-        │
-        ▼
-      OPA (v0 API — RBAC policy)
-        │ 200 allow / 404 deny
-        ▼
-      opa-proxy converts 404 → 403
-        │
-        ▼
-      Oathkeeper: 200 → allow, 403 → ErrForbidden
-        │
-        ▼
-      Workspace service (receives X-User-Name, X-User-Subject, X-User-Groups)
+## Mermaid Architecture
+
+```mermaid
+flowchart TB
+ subgraph PIP["PIP - Identity"]
+      Keycloak["Keycloak <br> JWT: roles + username"]
+  end
+ subgraph PAP["PAP - Policy"]
+      Policy["policy.rego <br> access-rules.yml"]
+  end
+ subgraph PEP["PEP - Enforcement"]
+      Traefik["Traefik <br> ForwardAuth"]
+      Oathkeeper["Oathkeeper <br> JWT validation"]
+  end
+ subgraph PDP["PDP - Decision"]
+      OPA["OPA <br> allow / deny (workspace side)"]
+  end
+   Browser(["Browser"]) -- 1. login --> Keycloak
+   Keycloak -- 2. JWT cookie --> Browser
+   Browser -- 3. request + cookie --> Traefik
+   Traefik -- 4. ForwardAuth --> Oathkeeper
+   Keycloak -. 5. JWKS fetched and cached .-> Oathkeeper
+   Oathkeeper -- 6. allow or deny --> Traefik
+   Traefik -- 7. forward --> Workspace(["Workspace"])
+   PAP -. rules .-> PDP
 ```
 
 ## Component Responsibilities
 
 | Component | Responsibility |
 |---|---|
-| Keycloak | IdP: token issuance, signing keys (JWKS), realm roles |
-| React SPA (`dtaas-client`) | PKCE login; stores access token as `dtaas_access_token` cookie |
-| Traefik | Routing and ForwardAuth hook |
-| Oathkeeper | JWT verification (authenticator) + policy orchestration (authorizer) |
-| opa-proxy | nginx adapter: converts OPA's 404 deny to 403 so Oathkeeper returns correct status |
-| OPA | RBAC policy evaluation (`policy.rego`) |
-| Workspace services | Business function only; trust gateway headers |
+| Keycloak | IdP: user authentication, token issuance, JWKS |
+| React SPA (`dtaas-client`) | PKCE login and token handling |
+| Traefik | Routing and ForwardAuth integration |
+| Oathkeeper | JWT verification + identity header injection |
+| OPA | Workspace-side policy evaluation (decoupled from Oathkeeper) |
 
-## Flow A: React SPA Login (Authorization Code + PKCE)
+## Flow A: User Login (Authorization Code + PKCE)
 
 1. User opens the DTaaS client at `https://<SERVER_DNS>/`.
-2. The SPA starts Authorization Code + PKCE against Keycloak with
-   `client_id=dtaas-workspace`.
-3. Keycloak authenticates the user and redirects back to `/Library` with an
-   auth code.
-4. SPA exchanges the code (+ `code_verifier`) at the token endpoint.
-5. SPA receives `id_token` and `access_token`.
-6. The access token is stored as the `dtaas_access_token` cookie so that
-   subsequent workspace navigation requests carry it automatically.
+2. The SPA starts PKCE flow against Keycloak.
+3. Keycloak authenticates the user and redirects back with auth code.
+4. SPA exchanges code and receives access token.
+5. SPA stores token as `dtaas_access_token` cookie for browser navigation.
 
-## Flow B: Workspace Request with Oathkeeper Enforcement
+## Flow B: Workspace Request (Gateway Authentication)
 
-1. Browser navigates to a workspace route, e.g.
-   `https://<SERVER_DNS>/user1/tools/vscode`.
-2. The `dtaas_access_token` cookie is sent automatically by the browser.
-3. Traefik's `oathkeeper-auth` ForwardAuth middleware calls
-   `http://oathkeeper:4456/decisions`.
-4. Oathkeeper reads the JWT from the `dtaas_access_token` cookie and validates:
-   - Signature (RS256/384/512) against Keycloak's JWKS endpoint
-   - `iss` claim matches `KEYCLOAK_ISSUER_URL`
-   - `aud` claim contains `KEYCLOAK_TARGET_AUDIENCE` (`dtaas-workspace`)
-   - Token expiry
-5. Oathkeeper posts the request context as raw JSON to
-   `http://opa-proxy:8080/v0/data/workspace/authz/allow`:
-   ```json
-   {
-     "subject": "<sub claim>",
-     "extra": { "preferred_username": "user1", "roles": ["dtaas-user"], ... },
-     "url": { "path": "/user1/tools/vscode" },
-     "method": "GET"
-   }
-   ```
-6. opa-proxy forwards the request to OPA (`http://opa:8181/v0/data/...`).
-7. OPA evaluates `policy.rego` and returns HTTP 200 (allow) or HTTP 404
-   (undefined/deny).
-8. opa-proxy passes through 200; converts 404 → 403.
-9. Oathkeeper receives:
-   - HTTP 200 → allow; injects `X-User-Name`, `X-User-Subject`,
-     `X-User-Groups` headers and returns 200 to Traefik.
-   - HTTP 403 → `ErrForbidden`; returns 403 to Traefik (and client).
-10. Traefik forwards allowed requests to the workspace container.
+1. Browser requests workspace path (for example `/user1/tools/vscode`) with
+  `dtaas_access_token` cookie.
+2. Traefik calls Oathkeeper via ForwardAuth (`/decisions`).
+3. Oathkeeper validates JWT:
+  - Signature against Keycloak JWKS
+  - `iss` equals configured issuer
+  - `aud` contains configured audience
+  - Expiry
+4. If valid, Oathkeeper returns allow and forwards identity headers.
+5. Traefik routes request to workspace container.
 
-## Claims Used for Authorization
+## Important Note on Step 5 (JWKS)
 
-Keycloak emits these claims in the JWT access token via protocol mappers
-configured by `configure_keycloak_rest.py`:
+Oathkeeper does not call Keycloak on every request for signature verification.
+It fetches JWKS and caches keys, then verifies JWT locally for subsequent
+requests.
 
-| Claim | Source | Used by |
-|---|---|---|
-| `preferred_username` | Standard OIDC `profile` scope | OPA path-matching |
-| `roles` | `oidc-usermodel-realm-role-mapper` | OPA RBAC role checks |
-| `aud` | Audience mapper | Oathkeeper audience validation |
+## Current Security Characteristics
 
-### RBAC Roles
-
-| Role | Access |
+| Area | Current state |
 |---|---|
-| `dtaas-admin` | Any workspace path, any HTTP method |
-| `dtaas-user` | Own workspace only, any method |
-| `dtaas-viewer` | Own workspace only, GET/HEAD/OPTIONS only |
-
-## Key Behavior vs Previous Setup
-
-| Aspect | Before | Now |
-|---|---|---|
-| Authorization model | None (path was unprotected) | RBAC via Keycloak realm roles |
-| Token verification | None | Oathkeeper validates every request |
-| Cross-user access | Always possible | Blocked by OPA for `dtaas-user` and `dtaas-viewer` |
-| Admin cross-user access | N/A | `dtaas-admin` role grants access to any workspace |
-| Identity headers | Not injected | `X-User-Name`, `X-User-Subject`, `X-User-Groups` forwarded upstream |
+| Authentication at gateway | Enforced by Oathkeeper |
+| Missing/invalid token | Denied (`401`) |
+| Cross-user path RBAC at gateway | Not enforced in decoupled mode |
+| Workspace-side RBAC | Planned via OPA integration with workspace nginx |
 
 ## Related Documents
 
-- [OATHKEEPER.md](OATHKEEPER.md) — Configuration reference and troubleshooting
-- [OATHKEEPER_DEMO.md](OATHKEEPER_DEMO.md) — Step-by-step demo
-- [OIDC_FLOWS.md](OIDC_FLOWS.md) — Comparison with previous auth approach
-- [KEYCLOAK_SETUP.md](KEYCLOAK_SETUP.md) — Keycloak realm and client setup
+- `OATHKEEPER.md`
+- `TRAEFIK_SECURE.md`
+- `TRAEFIK_TLS.md`
+- `KEYCLOAK_SETUP.md`

@@ -1,4 +1,8 @@
-# ORY Oathkeeper configuration for DTaaS workspace enforcement.
+# ORY Oathkeeper configuration for DTaaS workspace authentication.
+# Oathkeeper is responsible for JWT validation only — it validates tokens issued
+# by Keycloak and injects user identity headers (X-User-Name, X-User-Subject,
+# X-User-Groups) for upstream services.
+# Fine-grained RBAC authorization is handled separately by OPA via workspace nginx.
 # Traefik ForwardAuth calls the decision API at http://oathkeeper:4456/decisions.
 
 serve:
@@ -46,7 +50,7 @@ authenticators:
         cookie: dtaas_access_token
       # scope_strategy is set to none because the DTaaS PKCE client does not
       # request a specific OAuth scope for workspace access — authorization is
-      # enforced by OPA RBAC (groups claim) and audience validation instead.
+      # handled downstream by OPA via workspace nginx.
       # Set to 'exact' and configure required_scope if scopes are introduced.
       scope_strategy: none
       target_audience:
@@ -55,28 +59,6 @@ authenticators:
 authorizers:
   allow:
     enabled: true
-
-  remote_json:
-    enabled: true
-    config:
-      # OPA v0 API: returns HTTP 200 for allow, HTTP 404 for deny.
-      # Oathkeeper's remote_json authorizer returns ErrForbidden (403) only when
-      # the remote endpoint returns 403; any other non-200 becomes a 500.
-      # opa-proxy is a nginx adapter that converts OPA's 404 deny response to 403
-      # so Oathkeeper takes the correct ErrForbidden path.
-      # NOTE: v0 API takes the raw input document — do NOT wrap in {"input": ...}.
-      remote: http://opa-proxy:8080/v0/data/workspace/authz/allow
-      payload: |
-        {
-          "subject": "{{ .Subject }}",
-          "extra": {{ .Extra | toJson }},
-          "url": {"path": "{{ .MatchContext.URL.Path }}"},
-          "method": "{{ .MatchContext.Method }}"
-        }
-      forward_response_headers_to_upstream: []
-      retry:
-        give_up_after: 1s
-        max_delay: 100ms
 
   deny:
     enabled: true

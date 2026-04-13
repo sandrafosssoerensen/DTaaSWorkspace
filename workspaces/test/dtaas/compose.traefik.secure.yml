@@ -111,8 +111,6 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
-      opa-proxy:
-        condition: service_started
 
   opa:
     image: openpolicyagent/opa:1.15.2
@@ -127,17 +125,6 @@ services:
     networks:
       - users
 
-  opa-proxy:
-    # Nginx adapter: converts OPA's 404 deny response to 403 so Oathkeeper's
-    # remote_json authorizer returns a proper 403 Forbidden (not 500) to clients.
-    image: nginx:alpine
-    restart: unless-stopped
-    volumes:
-      - ./oathkeeper/opa-proxy.nginx.conf:/etc/nginx/nginx.conf:ro
-    networks:
-      - users
-    depends_on:
-      - opa
 
   client:
     image: intocps/dtaas-web:new-workspace
