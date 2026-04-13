@@ -7,7 +7,7 @@ authentication.
 ## Architecture
 
 ```text
-Browser  ──PKCE login──►  Keycloak (realm: dtaas, client: dtaas-workspace)
+Browser  ──PKCE login──►  Keycloak (realm: dtaas, client: dtaas-client)
                                │
                          issues JWT with:
                            preferred_username
@@ -15,8 +15,6 @@ Browser  ──PKCE login──►  Keycloak (realm: dtaas, client: dtaas-worksp
                            aud (dtaas-workspace)
                                │
                          stored as dtaas_access_token cookie
-                               │
-                     Traefik ForwardAuth
                                │
                           Oathkeeper
                            (validates JWT)
@@ -44,7 +42,7 @@ This runs `keycloak/configure_keycloak_rest.py` which creates idempotently:
 | What | Details |
 |---|---|
 | **Realm** | `dtaas` (or value of `KEYCLOAK_REALM`) |
-| **Client** | `dtaas-workspace` — public PKCE client, no secret |
+| **Client** | `dtaas-client` — public PKCE client, no secret |
 | **Realm roles** | `dtaas-admin`, `dtaas-user`, `dtaas-viewer` |
 | **Protocol mappers** | `roles` (realm roles flat array), `preferred_username`, audience |
 | **Users** | From `KEYCLOAK_USERS` in `.env` with passwords and role assignments |
@@ -87,10 +85,10 @@ Click **Administration Console** and log in with the credentials from `.env`.
 > it or Keycloak will reject HTTP requests from non-localhost addresses:
 > - **Realm Settings → General → Require SSL → None**
 
-### 3. Create the OIDC Client
+### 3. Create the OIDC Client for DTaaS SPA (Public PKCE)
 
 1. **Clients → Create client**
-2. **Client type**: OpenID Connect. **Client ID**: `dtaas-workspace`. Click **Next**.
+2. **Client type**: OpenID Connect. **Client ID**: `dtaas-client`. Click **Next**.
 3. **Capability config**:
    - **Client authentication**: OFF (public client — no secret)
    - **Authentication flow**: Standard flow ✓, Direct access grants ✓ (for testing)
@@ -100,9 +98,25 @@ Click **Administration Console** and log in with the credentials from `.env`.
    - **Web origins**: `https://<SERVER_DNS>`
 5. Click **Save**.
 
-> No client secret is needed — the DTaaS SPA uses PKCE (public client).
 
-### 4. Create Realm Roles
+### 4. Optional: Create Forward-Auth Client (Confidential)
+
+If you use a forward-auth flow (instead of this repository's Oathkeeper-only validation),
+create a second confidential client:
+
+1. **Clients → Create client**
+2. **Client type**: OpenID Connect. **Client ID**: `dtaas-workspace`. Click **Next**.
+3. **Capability config**:
+  - **Client authentication**: ON
+  - **Standard flow**: ON
+4. **Login settings**:
+  - **Valid redirect URIs**: `https://<SERVER_DNS>/_oauth/*`
+  - **Web origins**: `https://<SERVER_DNS>`
+5. Save and copy the generated secret into:
+  - `KEYCLOAK_FORWARD_AUTH_CLIENT_SECRET`
+  - and optionally `KEYCLOAK_CLIENT_SECRET` (legacy alias)
+
+### 5. Create Realm Roles
 
 In **Realm roles → Create role**, create three roles:
 
@@ -112,7 +126,7 @@ In **Realm roles → Create role**, create three roles:
 | `dtaas-user` | Access to own workspace only |
 | `dtaas-viewer` | Read-only access to own workspace |
 
-### 5. Add Protocol Mappers
+### 6. Add Protocol Mappers
 
 The `roles` claim **must be in the access token** so OPA can read it from
 the JWT. Add these mappers to the client (or a shared client scope):
@@ -133,7 +147,7 @@ the JWT. Add these mappers to the client (or a shared client scope):
 - **Included client audience**: `dtaas-workspace`
 - **Add to access token**: ON
 
-### 6. Create Users
+### 7. Create Users
 
 For each user:
 1. **Users → Create new user**
@@ -141,7 +155,7 @@ For each user:
 3. **Credentials** tab → **Set password** (Temporary: OFF).
 4. **Role mapping** tab → **Assign role** → select the appropriate DTaaS role.
 
-### 7. Disable SSL Requirement (HTTP deployments only)
+### 8. Disable SSL Requirement (HTTP deployments only)
 
 ```bash
 docker exec dtaas-keycloak-1 /opt/keycloak/bin/kcadm.sh \
@@ -166,7 +180,7 @@ After setup, decode a token to verify claims are correct:
 TOKEN=$(curl -sk -X POST \
   "https://<SERVER_DNS>/auth/realms/dtaas/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=password&client_id=dtaas-workspace&username=user1&password=user1" \
+  -d "grant_type=password&client_id=dtaas-client&username=user1&password=user1" \
   | jq -r '.access_token')
 
 # Inspect claims
@@ -241,7 +255,7 @@ cd workspaces/test/dtaas/keycloak
 python3 configure_keycloak_rest.py
 ```
 
-Or add the mapper manually: **Client → dtaas-workspace → Client scopes →
+Or add the mapper manually: **Client → dtaas-client → Client scopes →
 Add mapper → By configuration → User Realm Role**.
 
 ### Token Missing `aud` Claim
@@ -251,9 +265,9 @@ mapper (see step 5 above) or run the configurator.
 
 ### "Invalid Client" Error
 
-The client `dtaas-workspace` is a **public** PKCE client — no client secret
-is used or required. If you see this error, verify the client ID in `client.js`
-and `.env` both use `dtaas-workspace`.
+The client `dtaas-client` is a **public** PKCE client and should not require a
+client secret. The separate `dtaas-workspace` client is confidential and should
+be used only for forward-auth style setups.
 
 ### Configurator Script Fails
 

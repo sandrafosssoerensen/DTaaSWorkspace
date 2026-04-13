@@ -40,7 +40,16 @@
       - DELETE
       - OPTIONS
   authenticators:
+    # Try Authorization header first (programmatic fetch / Bearer token).
     - handler: jwt
+      config:
+        token_from:
+          header: Authorization
+    # Fall back to cookie for browser-navigation workspace requests.
+    - handler: jwt
+      config:
+        token_from:
+          cookie: dtaas_access_token
   authorizer:
     handler: allow
   mutators:

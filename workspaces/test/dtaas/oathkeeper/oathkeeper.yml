@@ -46,8 +46,8 @@ authenticators:
         - RS256
         - RS384
         - RS512
-      token_from:
-        cookie: dtaas_access_token
+      # token_from accepts only one source in Oathkeeper v26. Per-rule
+      # fallback (header → cookie) is configured in access-rules.yml instead.
       # scope_strategy is set to none because the DTaaS PKCE client does not
       # request a specific OAuth scope for workspace access — authorization is
       # handled downstream by OPA via workspace nginx.

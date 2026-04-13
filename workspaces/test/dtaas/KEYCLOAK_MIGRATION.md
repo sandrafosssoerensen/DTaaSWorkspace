@@ -32,26 +32,15 @@ keycloak:
 
 ## Modified Services
 
-### traefik-forward-auth
+### Oathkeeper
 
-Updated to use OIDC provider instead of generic OAuth:
+Current secure compose variants validate JWTs using Oathkeeper.
+The token audience check maps to the active SPA client ID.
 
-**Before:**
 ```yaml
 environment:
-  - DEFAULT_PROVIDER=generic-oauth
-  - PROVIDERS_GENERIC_OAUTH_AUTH_URL=${OAUTH_URL}/oauth/authorize
-  - PROVIDERS_GENERIC_OAUTH_TOKEN_URL=${OAUTH_URL}/oauth/token
-  - PROVIDERS_GENERIC_OAUTH_USER_URL=${OAUTH_URL}/api/v4/user
-```
-
-**After:**
-```yaml
-environment:
-  - DEFAULT_PROVIDER=oidc
-  - PROVIDERS_OIDC_ISSUER_URL=${KEYCLOAK_ISSUER_URL}
-  - PROVIDERS_OIDC_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
-  - PROVIDERS_OIDC_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
+   - KEYCLOAK_ISSUER_URL=${KEYCLOAK_ISSUER_URL}
+   - KEYCLOAK_TARGET_AUDIENCE=${KEYCLOAK_OATHKEEPER_CLIENT_ID}
 ```
 
 ## Configuration Files Updated
@@ -59,7 +48,7 @@ environment:
 ### 1. `compose.traefik.secure.yml`
 
 - Added `keycloak` service
-- Updated `traefik-forward-auth` to use OIDC
+- Configured `oathkeeper` to validate Keycloak JWT issuer and audience
 - Added `keycloak-data` volume for persistence
 - Added `depends_on` to ensure Keycloak starts before auth
 
@@ -84,7 +73,7 @@ environment:
 
 ## Environment Variables
 
-### New Required Variables
+### Key Variables
 
 ```bash
 # Keycloak admin credentials
@@ -93,9 +82,14 @@ KEYCLOAK_ADMIN_PASSWORD=changeme
 
 # Keycloak realm and client
 KEYCLOAK_REALM=dtaas
-KEYCLOAK_CLIENT_ID=dtaas-workspace
-KEYCLOAK_CLIENT_SECRET=<from-keycloak>
+KEYCLOAK_CLIENT_ID=dtaas-client
+KEYCLOAK_OATHKEEPER_CLIENT_ID=dtaas-workspace
 KEYCLOAK_ISSUER_URL=http://keycloak:8080/auth/realms/dtaas
+
+# Optional forward-auth client (confidential)
+KEYCLOAK_FORWARD_AUTH_CLIENT_ID=dtaas-workspace
+KEYCLOAK_FORWARD_AUTH_CLIENT_SECRET=<from-keycloak>
+KEYCLOAK_CLIENT_SECRET=<from-keycloak>  # legacy alias
 ```
 
 ### Shared Variables
@@ -121,9 +115,10 @@ USERNAME2=user2
 1. Set up Keycloak externally
 2. Update `KEYCLOAK_ISSUER_URL` to point to external Keycloak
 3. Remove `keycloak` service from compose file (optional)
-4. Configure client in external Keycloak
-5. Update `.env` with credentials
-6. Restart services
+4. Configure SPA client `dtaas-client` in external Keycloak
+5. Optional: configure confidential forward-auth client `dtaas-workspace`
+6. Update `.env` with credentials
+7. Restart services
 
 ## Benefits of This Design
 
@@ -180,7 +175,7 @@ After deploying the changes:
 4. **Check logs if issues occur:**
    ```bash
    docker compose -f compose.traefik.secure.yml logs keycloak
-   docker compose -f compose.traefik.secure.yml logs traefik-forward-auth
+   docker compose -f compose.traefik.secure.yml logs oathkeeper
    ```
 
 ## Production Considerations
@@ -193,7 +188,7 @@ Before deploying to production:
 4. ✅ Configure Keycloak with proper database (PostgreSQL/MySQL)
 5. ✅ Set up proper backup strategy for Keycloak data
 6. ✅ Configure Keycloak realm with appropriate security policies
-7. ✅ Set `INSECURE_COOKIE=false` in traefik-forward-auth
+7. ✅ If using forward-auth, set `INSECURE_COOKIE=false`
 8. ✅ Use strong client secrets
 9. ✅ Enable MFA for users
 10. ✅ Regular security audits
@@ -203,5 +198,4 @@ Before deploying to production:
 - [KEYCLOAK_SETUP.md](KEYCLOAK_SETUP.md) - Detailed setup instructions
 - [CONFIGURATION.md](CONFIGURATION.md) - General configuration guide
 - [Keycloak Documentation](https://www.keycloak.org/documentation)
-- [Traefik Forward Auth](https://github.com/thomseddon/traefik-forward-auth)
 - [OIDC Specification](https://openid.net/specs/openid-connect-core-1_0.html)

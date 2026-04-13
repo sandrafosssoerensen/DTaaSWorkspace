@@ -177,7 +177,7 @@ services:
       # so the issuer in issued tokens is https://<SERVER_DNS>/auth/realms/<realm>.
       - KEYCLOAK_ISSUER_URL=https://${SERVER_DNS:-localhost}/auth/realms/${KEYCLOAK_REALM:-dtaas}
       # Required audience ('aud' claim) in JWT access tokens.
-      - KEYCLOAK_TARGET_AUDIENCE=${KEYCLOAK_CLIENT_ID:-dtaas-client}
+      - KEYCLOAK_TARGET_AUDIENCE=${KEYCLOAK_OATHKEEPER_CLIENT_ID:-dtaas-workspace}
     labels:
       - "traefik.enable=true"
       # Define the ForwardAuth middleware. Traefik sends workspace requests here

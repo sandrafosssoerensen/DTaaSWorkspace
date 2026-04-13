@@ -64,7 +64,7 @@ This will:
 
 1. Start the Traefik reverse proxy on port 80
 2. Start Keycloak identity provider at `/auth`
-3. Start Oathkeeper authentication service (and OPA service for workspace-side integration)
+3. Start Oathkeeper gateway authentication service (and optional OPA service for workspace-side authorization integration)
 4. Start the DTaaS web client interface
 5. Start workspace instances for both users
 
@@ -83,7 +83,8 @@ This tears down any existing stack, starts fresh, and runs
 `keycloak/configure_keycloak_rest.py` which creates:
 
 - **Realm** `dtaas` (if missing)
-- **OIDC client** `dtaas-workspace` — public PKCE client, no secret required
+- **OIDC client** `dtaas-client` — public PKCE client, no secret required
+- **Oathkeeper audience target** `dtaas-workspace` via `KEYCLOAK_OATHKEEPER_CLIENT_ID`
 - **Realm roles**: `dtaas-admin`, `dtaas-user`, `dtaas-viewer`
 - **Users** from `KEYCLOAK_USERS` in `.env` with passwords and role assignments
 - **Protocol mappers**: `preferred_username`, `roles` (realm roles), audience

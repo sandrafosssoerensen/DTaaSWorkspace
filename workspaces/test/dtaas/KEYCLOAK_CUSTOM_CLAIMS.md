@@ -49,6 +49,9 @@ Required custom mappers in the shared scope:
   (Required so Oathkeeper's `target_audience` check passes — Keycloak does not include the
   client ID in `aud` by default.)
 
+If you also run a forward-auth flow with a separate confidential client,
+reuse `dtaas-workspace` there to keep one shared audience target.
+
 Not part of this contract:
 - `department`
 - `cost_center`

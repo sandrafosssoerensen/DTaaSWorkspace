@@ -98,6 +98,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     keycloak_context_path: str = "/auth"
     keycloak_realm: str = "dtaas"
     keycloak_client_id: str = "dtaas-workspace"
+    keycloak_oathkeeper_client_id: str = "dtaas-workspace"
     keycloak_use_shared_scope: bool = True
     keycloak_shared_scope_name: str = "dtaas-shared"
     keycloak_user_profiles: list[str] | None = None
@@ -398,14 +399,14 @@ class KeycloakRestConfigurator:
 
         These are applied regardless of shared-scope mode. The audience mapper
         is built dynamically so its included.client.audience always matches
-        the configured KEYCLOAK_CLIENT_ID.
+        the configured KEYCLOAK_OATHKEEPER_CLIENT_ID.
         """
         return [
             {
                 **mapper,
                 "config": {
                     **mapper["config"],
-                    "included.custom.audience": self.settings.keycloak_client_id,
+                    "included.custom.audience": self.settings.keycloak_oathkeeper_client_id,
                 },
             }
             if mapper["protocolMapper"] == "oidc-audience-mapper"
@@ -992,11 +993,15 @@ def resolve_default_env_file() -> str | None:
 
 def settings_from_env() -> Settings:
     """Build settings using environment variables with script defaults."""
+    keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "dtaas-workspace")
     return Settings(
         keycloak_base_url=os.getenv("KEYCLOAK_BASE_URL", "http://localhost"),
         keycloak_context_path=os.getenv("KEYCLOAK_CONTEXT_PATH", "/auth"),
         keycloak_realm=os.getenv("KEYCLOAK_REALM", "dtaas"),
-        keycloak_client_id=os.getenv("KEYCLOAK_CLIENT_ID", "dtaas-workspace"),
+        keycloak_client_id=keycloak_client_id,
+        keycloak_oathkeeper_client_id=os.getenv(
+            "KEYCLOAK_OATHKEEPER_CLIENT_ID", keycloak_client_id
+        ),
         keycloak_use_shared_scope=parse_bool_env("KEYCLOAK_USE_SHARED_SCOPE", True),
         keycloak_shared_scope_name=os.getenv("KEYCLOAK_SHARED_SCOPE_NAME", "dtaas-shared"),
         keycloak_user_profiles=parse_user_profiles_env("KEYCLOAK_USER_PROFILES"),

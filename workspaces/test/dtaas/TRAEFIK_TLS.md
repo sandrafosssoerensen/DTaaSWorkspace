@@ -10,7 +10,7 @@ deployments.
 ✅ Docker Compose v2.x  
 ✅ Sufficient system resources (at least 1GB RAM per workspace instance)  
 ✅ Valid TLS certificates (production) or self-signed certs (testing)
-✅ OAuth2 provider (GitLab, GitHub, Google, etc.)  
+✅ Keycloak OIDC provider configured for DTaaS  
 ✅ Domain name pointing to your server (production) or localhost (testing)
 
 ## 🗒️ Overview
@@ -63,7 +63,7 @@ This will:
 
 1. Start Traefik reverse proxy with TLS on ports 80 (HTTP → HTTPS redirect)
    and 443 (HTTPS)
-2. Start Oathkeeper authentication service (and OPA service for workspace-side integration)
+2. Start Oathkeeper gateway authentication service (and optional OPA service for workspace-side authorization integration)
 3. Start workspace instances for user1 and user2, protected by
    authentication
 

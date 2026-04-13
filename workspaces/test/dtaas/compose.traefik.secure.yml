@@ -1,5 +1,7 @@
 # ⚠️ DEVELOPMENT ONLY - INSECURE CONFIGURATION ⚠️
-# This configuration uses Traefik for multi-user scenario. Oathkeeper + OPA are used for authorization.
+# This configuration uses Traefik for multi-user scenario.
+# Oathkeeper enforces Keycloak JWT authentication at the gateway boundary.
+# OPA is available for workspace-side authorization integration.
 # This configuration uses HTTP (not HTTPS) and insecure flags for development/testing.
 # For production deployments with TLS/HTTPS, use compose.traefik.secure.tls.yml instead.
 
@@ -93,7 +95,7 @@ services:
       # HTTPS Keycloak (the hardcoded http:// would mismatch an https:// issuer).
       - KEYCLOAK_ISSUER_URL=${KEYCLOAK_ISSUER_URL:-http://localhost/auth/realms/dtaas}
       # Required audience ('aud' claim) in JWT access tokens.
-      - KEYCLOAK_TARGET_AUDIENCE=${KEYCLOAK_CLIENT_ID:-dtaas-client}
+      - KEYCLOAK_TARGET_AUDIENCE=${KEYCLOAK_OATHKEEPER_CLIENT_ID:-dtaas-workspace}
     labels:
       - "traefik.enable=true"
       # Define the ForwardAuth middleware. Traefik sends workspace requests here

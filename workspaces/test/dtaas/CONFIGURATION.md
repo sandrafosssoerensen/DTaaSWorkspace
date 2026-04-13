@@ -166,11 +166,15 @@ issuer. Use the Keycloak realm issuer URL:
 
 Configure a Keycloak OIDC client for the DTaaS web frontend with:
 
-1. **Client ID**: `dtaas-workspace`
+1. **Client ID**: `dtaas-client`
 2. **Redirect URI**: `<PROTOCOL>://<DOMAIN_NAME>/Library`
 3. **Post logout redirect URI**: `<PROTOCOL>://<DOMAIN_NAME>/`
 4. **Standard flow** enabled
 5. **PKCE** enabled if your DTaaS frontend requires public-client login
+
+For optional forward-auth style flows, configure a separate confidential client
+(`dtaas-workspace`) and keep its secret in `KEYCLOAK_FORWARD_AUTH_CLIENT_SECRET`
+(with `KEYCLOAK_CLIENT_SECRET` as legacy alias).
 
 Update [`config/client.js`](./config/client.js) so these values match your realm:
 
@@ -213,8 +217,8 @@ Quick overview:
    # Keycloak Realm
    KEYCLOAK_REALM=dtaas
 
-   # Keycloak Client ID — public PKCE client (no secret required)
-   KEYCLOAK_CLIENT_ID=dtaas-workspace
+  # Keycloak Client ID — public PKCE client (no secret required)
+  KEYCLOAK_CLIENT_ID=dtaas-client
 
    # Keycloak Issuer URL — must match the 'iss' claim in JWTs exactly
    # HTTP:  http://<SERVER_DNS>/auth/realms/<KEYCLOAK_REALM>

@@ -14,7 +14,7 @@ The `compose.traefik.secure.tls.yml` has been updated to use **Keycloak** for au
 
 ### 2. Updated Authentication Flow
 ```
-User → Traefik → Forward Auth → Keycloak (OIDC) → Protected Service
+User → Traefik → Oathkeeper (JWT validation) → Keycloak (OIDC issuer) → Protected Service
 ```
 
 ### 3. New Environment Variables
@@ -23,8 +23,10 @@ User → Traefik → Forward Auth → Keycloak (OIDC) → Protected Service
 | `KEYCLOAK_ADMIN` | Admin username | `admin` |
 | `KEYCLOAK_ADMIN_PASSWORD` | Admin password | `changeme` |
 | `KEYCLOAK_REALM` | Realm name | `dtaas` |
-| `KEYCLOAK_CLIENT_ID` | OIDC client ID | `dtaas-workspace` |
-| `KEYCLOAK_CLIENT_SECRET` | OIDC client secret | `<from-keycloak>` |
+| `KEYCLOAK_CLIENT_ID` | DTaaS SPA public PKCE client ID | `dtaas-client` |
+| `KEYCLOAK_FORWARD_AUTH_CLIENT_ID` | Optional confidential client ID (forward-auth setups) | `dtaas-workspace` |
+| `KEYCLOAK_FORWARD_AUTH_CLIENT_SECRET` | Optional confidential client secret | `<from-keycloak>` |
+| `KEYCLOAK_CLIENT_SECRET` | Legacy alias for forward-auth secret | `<from-keycloak>` |
 | `KEYCLOAK_ISSUER_URL` | OIDC issuer URL | `https://foo.com/auth/realms/dtaas` |
 
 ## Quick Setup
@@ -46,9 +48,9 @@ docker compose -f compose.traefik.secure.tls.yml --env-file config/.env up -d
 1. Go to `https://foo.com/auth`
 2. Login with admin credentials
 3. Create realm: `dtaas`
-4. Create client: `dtaas-workspace` (OIDC, confidential)
-5. Set redirect URIs: `https://foo.com/_oauth/*`
-6. Copy client secret to `.env`
+4. Create SPA client: `dtaas-client` (OIDC, public, PKCE S256)
+5. Optional: create forward-auth client: `dtaas-workspace` (OIDC, confidential)
+6. If using forward-auth, set redirect URIs to `https://foo.com/_oauth/*` and copy secret to `.env`
 7. Create users in Keycloak
 8. Restart services
 
@@ -86,7 +88,7 @@ docker compose -f compose.traefik.secure.tls.yml logs keycloak
 
 ### Authentication issues
 ```bash
-docker compose -f compose.traefik.secure.tls.yml logs traefik-forward-auth
+docker compose -f compose.traefik.secure.tls.yml logs oathkeeper
 ```
 
 ### Check all services
