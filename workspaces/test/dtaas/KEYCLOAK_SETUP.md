@@ -1,350 +1,273 @@
 # Keycloak Setup Guide for DTaaS
 
-This guide explains how to configure Keycloak for authentication in the DTaaS workspace deployment using `compose.traefik.secure.tls.yml`.
-
-## Overview
-
-The updated configuration uses:
-- **Keycloak** as the identity provider (IdP) with OIDC support
-- **Traefik Forward Auth** to protect routes using OIDC
-- **Traefik** as the reverse proxy
+This guide explains how to configure Keycloak as the identity provider for the
+DTaaS workspace deployment. Authorization is enforced by Oathkeeper + OPA using
+Keycloak realm roles (RBAC).
 
 ## Architecture
 
 ```text
-User Request → Traefik → Forward Auth → Keycloak (OIDC)
-               ↓
-           Protected Service
+Browser  ──PKCE login──►  Keycloak (realm: dtaas, client: dtaas-workspace)
+                               │
+                         issues JWT with:
+                           preferred_username
+                           roles (realm roles)
+                           aud (dtaas-workspace)
+                               │
+                         stored as dtaas_access_token cookie
+                               │
+                     Traefik ForwardAuth
+                               │
+                          Oathkeeper
+                           (validates JWT, calls OPA via opa-proxy)
 ```
 
 ## Prerequisites
 
-✅ Docker Engine v27 or later
-✅ Docker Compose
-✅ Port 80 available on your host
-✅ At least 2GB RAM available
+- Docker Engine v27+
+- Stack running (`compose.traefik.secure.yml` or `compose.traefik.secure.tls.yml`)
+- `config/.env` configured (copy from `config/.env.example`)
 
-## Quick Start
+## Quick Start — Automated Setup
 
-### 1. Configure Environment Variables
+The fastest way is the reset script with the configurator flag. It tears down
+any existing stack, starts fresh, and fully configures Keycloak:
 
-Copy the example environment file and update it:
+```powershell
+.\scripts\reset-dtaas.ps1 -RunConfigurator
+```
+
+This runs `keycloak/configure_keycloak_rest.py` which creates idempotently:
+
+| What | Details |
+|---|---|
+| **Realm** | `dtaas` (or value of `KEYCLOAK_REALM`) |
+| **Client** | `dtaas-workspace` — public PKCE client, no secret |
+| **Realm roles** | `dtaas-admin`, `dtaas-user`, `dtaas-viewer` |
+| **Protocol mappers** | `roles` (realm roles flat array), `preferred_username`, audience |
+| **Users** | From `KEYCLOAK_USERS` in `.env` with passwords and role assignments |
+
+No manual Keycloak console steps required.
+
+### Configuring Users in `.env`
+
+Set `KEYCLOAK_USERS` as a JSON array in `config/.env`:
 
 ```bash
-cd workspaces/test/dtaas
-cp config/.env.example config/.env
+KEYCLOAK_USERS=[
+  {"username":"user1","password":"user1","role":"dtaas-user","email":"user1@example.com","firstName":"User","lastName":"One"},
+  {"username":"user2","password":"user2","role":"dtaas-user","email":"user2@example.com","firstName":"User","lastName":"Two"},
+  {"username":"sandra","password":"sandra","role":"dtaas-admin","email":"sandra@example.com","firstName":"Sandra","lastName":"Admin"}
+]
 ```
 
-Edit `config/.env`:
+Valid roles: `dtaas-admin`, `dtaas-user`, `dtaas-viewer`.
+
+---
+
+## Manual Setup (Reference)
+
+Use these steps if you need to configure Keycloak manually or are integrating
+an external Keycloak instance.
+
+### 1. Access Keycloak Admin Console
+
+Navigate to `https://<SERVER_DNS>/auth` (TLS) or `http://<SERVER_DNS>/auth` (HTTP).
+Click **Administration Console** and log in with the credentials from `.env`.
+
+### 2. Create the Realm
+
+1. In the top-left dropdown click **Create Realm**.
+2. **Realm name**: `dtaas` (must match `KEYCLOAK_REALM` in `.env`).
+3. Click **Create**.
+
+> **HTTP deployments only**: Keycloak defaults to `sslRequired=external`. Disable
+> it or Keycloak will reject HTTP requests from non-localhost addresses:
+> - **Realm Settings → General → Require SSL → None**
+
+### 3. Create the OIDC Client
+
+1. **Clients → Create client**
+2. **Client type**: OpenID Connect. **Client ID**: `dtaas-workspace`. Click **Next**.
+3. **Capability config**:
+   - **Client authentication**: OFF (public client — no secret)
+   - **Authentication flow**: Standard flow ✓, Direct access grants ✓ (for testing)
+   - **PKCE**: S256
+4. **Login settings**:
+   - **Valid redirect URIs**: `https://<SERVER_DNS>/Library`, `https://<SERVER_DNS>/*`
+   - **Web origins**: `https://<SERVER_DNS>`
+5. Click **Save**.
+
+> No client secret is needed — the DTaaS SPA uses PKCE (public client).
+
+### 4. Create Realm Roles
+
+In **Realm roles → Create role**, create three roles:
+
+| Role name | Description |
+|---|---|
+| `dtaas-admin` | Full access to any workspace (cross-user) |
+| `dtaas-user` | Access to own workspace only |
+| `dtaas-viewer` | Read-only access to own workspace |
+
+### 5. Add Protocol Mappers
+
+The `roles` claim **must be in the access token** so OPA can read it from
+the JWT. Add these mappers to the client (or a shared client scope):
+
+#### roles mapper (required for RBAC)
+
+- **Mapper type**: User Realm Role
+- **Name**: `roles`
+- **Claim name**: `roles`
+- **Add to access token**: ON
+- **Add to userinfo**: ON
+- **Multivalued**: ON
+
+#### audience mapper (required for Oathkeeper)
+
+- **Mapper type**: Audience
+- **Name**: `audience`
+- **Included client audience**: `dtaas-workspace`
+- **Add to access token**: ON
+
+### 6. Create Users
+
+For each user:
+1. **Users → Create new user**
+2. Set **Username**, **Email**, **First/Last name**. **Email verified**: ON.
+3. **Credentials** tab → **Set password** (Temporary: OFF).
+4. **Role mapping** tab → **Assign role** → select the appropriate DTaaS role.
+
+### 7. Disable SSL Requirement (HTTP deployments only)
 
 ```bash
-# Keycloak Admin Credentials (for initial setup)
-KEYCLOAK_ADMIN=admin
-KEYCLOAK_ADMIN_PASSWORD=changeme
+docker exec dtaas-keycloak-1 /opt/keycloak/bin/kcadm.sh \
+  config credentials --server http://localhost:8080/auth \
+  --realm master --user <KEYCLOAK_ADMIN> --password <KEYCLOAK_ADMIN_PASSWORD>
 
-# Keycloak Realm
-KEYCLOAK_REALM=dtaas
+docker exec dtaas-keycloak-1 /opt/keycloak/bin/kcadm.sh \
+  update realms/master -s sslRequired=NONE
 
-# Keycloak Client Configuration (will be created in step 2)
-KEYCLOAK_CLIENT_ID=dtaas-workspace
-KEYCLOAK_CLIENT_SECRET=<generated-secret>
-
-# Server Configuration
-SERVER_DNS=foo.com
-
-# Generate a secure secret for OAuth sessions (run locally)
-OAUTH_SECRET=$(openssl rand -base64 32)
-
-# Usernames
-USERNAME1=user1
-USERNAME2=user2
+docker exec dtaas-keycloak-1 /opt/keycloak/bin/kcadm.sh \
+  update realms/dtaas -s sslRequired=NONE
 ```
 
-### 2. Start Services
+---
 
-The `keycloak` service is in [secure traefik](TRAEFIK_SECURE.md) and
-[secure Traefik with TLS](TRAEFIK_TLS.md) deployments.
+## Verifying the Configuration
 
-Start all services:
+After setup, decode a token to verify claims are correct:
 
 ```bash
-docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env up -d
-# or
-docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env up -d
+# Get a token (requires Direct Access Grants enabled on the client)
+TOKEN=$(curl -sk -X POST \
+  "https://<SERVER_DNS>/auth/realms/dtaas/protocol/openid-connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password&client_id=dtaas-workspace&username=user1&password=user1" \
+  | jq -r '.access_token')
+
+# Inspect claims
+echo $TOKEN | cut -d. -f2 | base64 -d 2>/dev/null | jq '{preferred_username, roles, aud}'
 ```
 
-### 3. Configure Keycloak
-
-#### Access Keycloak Admin Console
-
-1. Navigate to `https://<SERVER_DNS>/auth`
-2. Click **Administration Console**
-3. Login with credentials from your `.env` file (default: `admin` / `admin`)
-
-#### Create a Realm
-
-1. In the top-left dropdown (currently showing "Master"), click **Create Realm**
-2. **Realm name**: `dtaas` (or match your `KEYCLOAK_REALM` in `.env`)  
-3. Click **Create**
-
-#### Create a Client
-
-1. In the left sidebar, click **Clients**
-2. Click **Create client**
-3. Configure the client:
-   - **Client type**: OpenID Connect
-   - **Client ID**: `dtaas-workspace` (match `KEYCLOAK_CLIENT_ID` in `.env`)
-   - Click **Next**
-4. Capability config:
-   - Client authentication: ON
-   - Authorization: OFF
-   - Authentication flow: enable **Standard flow**
-   - Click **Next**
-5. Login settings:
-   - **Root URL**: `https://foo.com`
-   - **Valid redirect URIs**:
-    - `https://foo.com/_oauth/*`
-    - `https://foo.com/*`
-    - `https://foo.com/Library`
-   - **Valid post logout redirect URIs**: `https://foo.com/*`
-   - **Web origins**: `https://foo.com`
-   - Click **Save**
-6. Get the client secret:
-   - Go to the **Credentials** tab
-   - Copy the **Client secret** value
-   - Update `KEYCLOAK_CLIENT_SECRET` in your `.env` file
-
-#### Configure Required Scopes
-
-Start with the standard OIDC scopes only:
-
-- `openid`
-- `profile`
-- `email`
-
-These are the scopes requested by `traefik-forward-auth` in this repository.
-If the DTaaS frontend still requests legacy GitLab scopes such as `read_user`,
-`read_repository`, or `api`, add matching optional client scopes in Keycloak
-only if the frontend actually fails without them.
-
-#### Configure Required Claims
-
-For DTaaS compatibility, verify that the ID token or userinfo response exposes
-at least these claims:
-
-- `sub`
-- `name`
-- `preferred_username`
-- `profile`
-- `groups`
-
-`sub`, `name`, and `preferred_username` are usually available already. The
-`profile` claim normally needs a custom mapper if DTaaS expects a GitLab-style
-profile URL.
-
-#### Add the `profile` Claim Mapper
-
-If DTaaS expects:
-
-```text
-profile = https://foo.com/gitlab/{username}
+Expected output:
+```json
+{
+  "preferred_username": "user1",
+  "roles": ["dtaas-user"],
+  "aud": ["dtaas-workspace", "account"]
+}
 ```
 
-add a protocol mapper that emits `profile` in the ID token and userinfo
-response based on `preferred_username`. Depending on your Keycloak version,
-this can be done with a script mapper or another mapper that builds the value
-from the username.
-
-#### Add the `groups` Claim Mapper
-
-Add a Group Membership mapper so the userinfo response includes a `groups`
-claim. This is useful both for DTaaS compatibility and later authorization
-rules.
-
-#### Create Users
-
-1. In the left sidebar, click **Users**
-2. Click **Create new user**
-3. Fill in user details:
-   - **Username**: `user1` (or desired username)
-   - **Email**: user's email (optional)
-   - **First name** / **Last name**: optional
-   - **Email verified**: ON (optional, for testing)
-4. Click **Create**
-5. Set password:
-   - Go to the **Credentials** tab
-   - Click **Set password**
-   - Enter a password
-   - **Temporary**: OFF (so users don't have to change it on first login)  
-   - Click **Save**
-6. Repeat for additional users (e.g., `user2`)
-
-### 4. Restart Services
-
-After configuring Keycloak, restart the services to apply the new client secret:
-
-```bash
-docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml --env-file workspaces/test/dtaas/config/.env up -d --force-recreate traefik-forward-auth
-# or
-docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml --env-file workspaces/test/dtaas/config/.env up -d  --force-recreate traefik-forward-auth
-```
-
-### 5. Test Authentication
-
-1. Navigate to `https://foo.com/`
-2. You should be redirected to Keycloak login
-3. Login with one of the users you created
-4. You should be redirected back to the DTaaS interface
-
-## Access Control Configuration
-
-Copy `config/conf.example` to `config/conf` and edit it:
-
-```ini
-# Allow only user1 to access /user1 paths
-rule.user1_access.action=auth
-rule.user1_access.rule=PathPrefix(`/user1`)
-rule.user1_access.whitelist=user1@localhost
-
-# Allow only user2 to access /user2 paths
-rule.user2_access.action=auth
-rule.user2_access.rule=PathPrefix(`/user2`)
-rule.user2_access.whitelist=user2@localhost
-```
-
-**Note**: The whitelist uses the email address from Keycloak. Adjust accordingly.
+---
 
 ## Production Considerations
 
-### 1. Use HTTPS
+### External Keycloak
 
-Use `compose.traefik.secure.tls.yml` for TLS/HTTPS in production.
+To use an external Keycloak instance:
 
-### 2. External Keycloak
-
-To use an external Keycloak instance (recommended for production):
-
-1. Update `KEYCLOAK_ISSUER_URL` in `.env`:
+1. Set `KEYCLOAK_ISSUER_URL` in `.env` to the public issuer URL:
    ```bash
    KEYCLOAK_ISSUER_URL=https://keycloak.example.com/auth/realms/dtaas
    ```
+2. Set `KEYCLOAK_JWKS_URL` to the external JWKS endpoint:
+   ```bash
+   KEYCLOAK_JWKS_URL=https://keycloak.example.com/auth/realms/dtaas/protocol/openid-connect/certs
+   ```
+3. Remove or comment out the `keycloak` service from the compose file.
+4. Create the realm, client, roles, and mappers manually or via the configurator
+   script pointed at the external instance.
 
-2. Optionally remove the `keycloak` service from `compose.traefik.secure.tls.yml`:
-   - Comment out or delete the `keycloak` service section
-   - Remove `keycloak` from `depends_on` in `traefik-forward-auth`
-   - Remove the `keycloak-data` volume
+### Secure Credentials
 
-3. Update client redirect URIs in Keycloak to use your production domain
+- Change the default Keycloak admin password in `.env`.
+- Use strong, unique passwords for all users.
+- Rotate secrets and certificates regularly.
 
-### 3. Secure Credentials
+### Database Backend
 
-- Change the default Keycloak admin password
-- Use strong client secrets
-- Store secrets securely (Docker secrets or external secret managers)
-- Rotate secrets regularly
-
-### 4. Database Backend
-
-For production, configure Keycloak with a proper database (PostgreSQL, MySQL):
+For production, configure Keycloak with PostgreSQL:
 
 ```yaml
 keycloak:
   environment:
-   - KC_DB=postgres
-   - KC_DB_URL=jdbc:postgresql://postgres:5432/keycloak
-   - KC_DB_USERNAME=keycloak
-   - KC_DB_PASSWORD=secure_password
+    - KC_DB=postgres
+    - KC_DB_URL=jdbc:postgresql://postgres:5432/keycloak
+    - KC_DB_USERNAME=keycloak
+    - KC_DB_PASSWORD=secure_password
 ```
+
+---
 
 ## Troubleshooting
 
-### Cannot Access Keycloak Admin Console
+### Keycloak Not Accessible
 
-- Ensure the Keycloak service is running: `docker compose ps`
-- Check Keycloak logs: `docker compose logs keycloak`
-- Verify port 80/443 is accessible
+```bash
+docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml \
+  --env-file workspaces/test/dtaas/config/.env logs keycloak
+```
 
-### Authentication Loop/Redirect Issues
+### Token Missing `roles` Claim
 
-- Verify `KEYCLOAK_ISSUER_URL` matches the realm name
-- Ensure redirect URIs in the Keycloak client include `/_oauth/*`
-- Confirm `COOKIE_DOMAIN` matches your domain
-- Clear browser cookies and retry
+Run the configurator to create the missing mapper:
+
+```bash
+cd workspaces/test/dtaas/keycloak
+python3 configure_keycloak_rest.py
+```
+
+Or add the mapper manually: **Client → dtaas-workspace → Client scopes →
+Add mapper → By configuration → User Realm Role**.
+
+### Token Missing `aud` Claim
+
+Oathkeeper rejects tokens without the correct audience. Add the audience
+mapper (see step 5 above) or run the configurator.
 
 ### "Invalid Client" Error
 
-- Verify `KEYCLOAK_CLIENT_ID` matches the client ID in Keycloak
-- Ensure `KEYCLOAK_CLIENT_SECRET` is correct
-- Confirm client authentication is enabled for the client
+The client `dtaas-workspace` is a **public** PKCE client — no client secret
+is used or required. If you see this error, verify the client ID in `client.js`
+and `.env` both use `dtaas-workspace`.
 
-### Forward Auth Not Working
-
-- Check traefik-forward-auth logs: `docker compose logs traefik-forward-auth`
-- Verify environment variables are set correctly
-- Ensure Keycloak is reachable from the traefik-forward-auth container
-
-## Advanced Configuration
-
-### Custom Claims and Scopes
-
-The DTaaS workspace configurator manages a `profile` protocol mapper and supports
-both direct client mapper mode (default) and shared-scope mode.
-
-Use the automation script to configure this idempotently against any Keycloak instance:
+### Configurator Script Fails
 
 ```bash
-# Python script (Linux / macOS / WSL)
-KEYCLOAK_BASE_URL=https://your-keycloak \
-KEYCLOAK_CONTEXT_PATH=/auth \
-KEYCLOAK_REALM=dtaas \
-KEYCLOAK_CLIENT_ID=dtaas-workspace \
-KEYCLOAK_ADMIN=admin \
-KEYCLOAK_ADMIN_PASSWORD=changeme \
-python3 workspaces/test/dtaas/keycloak/configure_keycloak_rest.py
+cd workspaces/test/dtaas/keycloak
+python3 configure_keycloak_rest.py --help
 ```
 
-The script creates (or reuses) the following protocol mapper:
-
-| Mapper | Claim name | Access token | Userinfo |
-|--------|-----------|:---:|:---:|
-| `profile` | `profile` | — | ✓ |
-
-By default, the mapper is placed directly on the `dtaas-workspace` client. Optionally,
-you can enable `KEYCLOAK_USE_SHARED_SCOPE=true` to place it on a shared client scope
-instead (see `.env.example` for configuration).
-
-The script also sets each user's `profile` attribute to `<PROFILE_BASE_URL>/<username>`
-(if `KEYCLOAK_PROFILE_BASE_URL` and `KEYCLOAK_USER_PROFILES` are configured).
-This operation is merge-safe — other existing attributes are preserved.
-
-> **Note**: `groups` is a built-in Keycloak mapper; the script does not create it.
-> To ensure group membership claims appear in tokens, assign the default `groups`
-> scope to your client or manually add the `groups` mapper if needed. The `groups_owner`
-> and `sub_legacy` mappers are not currently configured by this script.
-
-For the full environment variable reference, run the configurator with `--help`
-or see the inline documentation in
-`workspaces/test/dtaas/keycloak/configure_keycloak_rest.py`.
-
-### Role-Based Access Control (RBAC)
-
-RBAC is supported in Keycloak but not implemented in the traefik-forward-auth service by default.
-
-### Single Sign-On (SSO)
-
-Keycloak supports SSO across multiple applications. Configure additional clients for other services as needed.
-
-## Migration from GitLab OAuth
-
-If you're migrating from the previous GitLab OAuth setup:
-
-1. Backup your current `.env` file
-2. Update `.env` with Keycloak configuration
-3. Update user whitelist in `config/conf` to use Keycloak usernames/emails
-4. Test with a single user before migrating all users
+Check that Keycloak is healthy before running:
+```bash
+docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml ps keycloak
+```
 
 ## References
 
+- [OATHKEEPER.md](OATHKEEPER.md) — Oathkeeper + OPA architecture and configuration
+- [KEYCLOAK_CUSTOM_CLAIMS.md](KEYCLOAK_CUSTOM_CLAIMS.md) — Claims contract
+- [CONFIGURATION.md](CONFIGURATION.md) — Environment variable reference
 - [Keycloak Documentation](https://www.keycloak.org/documentation)
-- [Traefik Forward Auth](https://github.com/thomseddon/traefik-forward-auth)
-- [OIDC Specification](https://openid.net/specs/openid-connect-core-1_0.html)

@@ -1,10 +1,35 @@
 # DTaaS Oathkeeper access rules.
+# The remote_json authorizer config (remote URL, payload) is defined centrally
+# in oathkeeper.yml under authorizers.remote_json.config — no per-rule overrides.
 
+# Rule 1: Health check — no authentication required.
+- id: dtaas-public-health
+  version: "v0.36.0-beta.1"
+  description: >
+    Allow unauthenticated GET/HEAD access to health-check endpoints.
+  match:
+    url: "<^/health.*$>"
+    methods:
+      - GET
+      - HEAD
+  authenticators:
+    - handler: noop
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
+
+# Rule 2: Workspace user paths — require valid JWT + OPA RBAC.
+# Roles are enforced by policy.rego via OPA:
+#   admins  → access any workspace path (cross-user)
+#   users   → access only their own workspace (all methods)
+#   viewers → read-only access to their own workspace (GET/HEAD/OPTIONS)
 - id: dtaas-workspace-jwt-enforcement
   version: "v0.36.0-beta.1"
   description: >
-    Requires a valid Keycloak-issued JWT and enforces per-user path authorization
-    via OPA policy checks.
+    Requires a valid Keycloak-issued JWT. RBAC is enforced by OPA policy:
+    admins can access any workspace, users access their own, viewers are
+    read-only on their own workspace.
   match:
     url: "<.*>"
     methods:
@@ -19,16 +44,5 @@
     - handler: jwt
   authorizer:
     handler: remote_json
-    config:
-      remote: http://opa:8181/v0/data/workspace/authz/allow
-      payload: |
-        {
-          "input": {
-            "subject": "{{ .Subject }}",
-            "extra": {{ .Extra | toJson }},
-            "url": {"path": "{{ .MatchContext.URL.Path }}"},
-            "method": "{{ .MatchContext.Method }}"
-          }
-        }
   mutators:
     - handler: header

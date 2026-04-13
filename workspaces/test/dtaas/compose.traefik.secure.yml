@@ -61,7 +61,7 @@ services:
       - users
 
   oathkeeper:
-    image: oryd/oathkeeper:v0.40.8
+    image: oryd/oathkeeper:v26.2.0
     restart: unless-stopped
     # Serve both the proxy (4455) and the decision API (4456).
     # Traefik ForwardAuth calls the decision API at http://oathkeeper:4456/decisions.
@@ -93,14 +93,14 @@ services:
       # HTTPS Keycloak (the hardcoded http:// would mismatch an https:// issuer).
       - KEYCLOAK_ISSUER_URL=${KEYCLOAK_ISSUER_URL:-http://localhost/auth/realms/dtaas}
       # Required audience ('aud' claim) in JWT access tokens.
-      - KEYCLOAK_TARGET_AUDIENCE=${KEYCLOAK_CLIENT_ID:-dtaas-workspace}
+      - KEYCLOAK_TARGET_AUDIENCE=${KEYCLOAK_CLIENT_ID:-dtaas-client}
     labels:
       - "traefik.enable=true"
       # Define the ForwardAuth middleware. Traefik sends workspace requests here
       # for JWT validation before forwarding to the workspace service.
       - "traefik.http.middlewares.oathkeeper-auth.forwardauth.address=http://oathkeeper:4456/decisions"
       # Forward authenticated user identity headers from Oathkeeper to upstream services.
-      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authResponseHeaders=X-User-Name,X-User-Subject"
+      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authResponseHeaders=X-User-Name,X-User-Subject,X-User-Groups"
       # Forward the Authorization header and Cookie so Oathkeeper can validate
       # both Bearer tokens (programmatic fetch) and the dtaas_access_token cookie
       # (browser-navigation workspace requests).
@@ -111,11 +111,11 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
-      opa:
+      opa-proxy:
         condition: service_started
 
   opa:
-    image: openpolicyagent/opa:0.70.0
+    image: openpolicyagent/opa:1.15.2
     restart: unless-stopped
     command:
       - run
@@ -126,6 +126,18 @@ services:
       - ./oathkeeper/policy.rego:/policies/policy.rego
     networks:
       - users
+
+  opa-proxy:
+    # Nginx adapter: converts OPA's 404 deny response to 403 so Oathkeeper's
+    # remote_json authorizer returns a proper 403 Forbidden (not 500) to clients.
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./oathkeeper/opa-proxy.nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - users
+    depends_on:
+      - opa
 
   client:
     image: intocps/dtaas-web:new-workspace
@@ -178,6 +190,26 @@ services:
       - "traefik.http.routers.u2.entryPoints=web"
       - "traefik.http.routers.u2.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME2:-user2}`)"
       - "traefik.http.routers.u2.middlewares=oathkeeper-auth"
+    networks:
+      - users
+
+  admin:
+    image: intocps/workspace:latest
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: Dockerfile.ubuntu.noble.gnome
+    environment:
+      - MAIN_USER=${USERNAME_ADMIN:-sandra}
+    volumes:
+      - ./files/${USERNAME_ADMIN:-sandra}:/workspace
+      - ./files/common:/workspace/common
+    shm_size: 512m
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.admin.entryPoints=web"
+      - "traefik.http.routers.admin.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME_ADMIN:-sandra}`)"
+      - "traefik.http.routers.admin.middlewares=oathkeeper-auth"
     networks:
       - users
 

@@ -44,6 +44,10 @@ authenticators:
         - RS512
       token_from:
         cookie: dtaas_access_token
+      # scope_strategy is set to none because the DTaaS PKCE client does not
+      # request a specific OAuth scope for workspace access — authorization is
+      # enforced by OPA RBAC (groups claim) and audience validation instead.
+      # Set to 'exact' and configure required_scope if scopes are introduced.
       scope_strategy: none
       target_audience:
         - ${KEYCLOAK_TARGET_AUDIENCE}
@@ -55,15 +59,19 @@ authorizers:
   remote_json:
     enabled: true
     config:
-      remote: http://opa:8181/v0/data/workspace/authz/allow
+      # OPA v0 API: returns HTTP 200 for allow, HTTP 404 for deny.
+      # Oathkeeper's remote_json authorizer returns ErrForbidden (403) only when
+      # the remote endpoint returns 403; any other non-200 becomes a 500.
+      # opa-proxy is a nginx adapter that converts OPA's 404 deny response to 403
+      # so Oathkeeper takes the correct ErrForbidden path.
+      # NOTE: v0 API takes the raw input document — do NOT wrap in {"input": ...}.
+      remote: http://opa-proxy:8080/v0/data/workspace/authz/allow
       payload: |
         {
-          "input": {
-            "subject": "{{ .Subject }}",
-            "extra": {{ .Extra | toJson }},
-            "url": {"path": "{{ .MatchContext.URL.Path }}"},
-            "method": "{{ .MatchContext.Method }}"
-          }
+          "subject": "{{ .Subject }}",
+          "extra": {{ .Extra | toJson }},
+          "url": {"path": "{{ .MatchContext.URL.Path }}"},
+          "method": "{{ .MatchContext.Method }}"
         }
       forward_response_headers_to_upstream: []
       retry:
@@ -83,3 +91,4 @@ mutators:
       headers:
         X-User-Name: "{{ print .Extra.preferred_username }}"
         X-User-Subject: "{{ .Subject }}"
+        X-User-Groups: "{{ .Extra.groups | toJson }}"

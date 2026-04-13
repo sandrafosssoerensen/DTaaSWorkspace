@@ -48,6 +48,23 @@ MAPPERS: list[dict[str, Any]] = [
             "multivalued": "true",
         },
     },
+    {
+        # Emits the user's assigned realm roles as a flat 'roles' array in the
+        # access token.  OPA reads input.extra.roles to make RBAC decisions.
+        # Expected roles: dtaas-admin, dtaas-user, dtaas-viewer.
+        "name": "roles",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-realm-role-mapper",
+        "consentRequired": False,
+        "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String",
+        },
+    },
 ]
 
 # Mappers applied directly on the client regardless of shared-scope mode.
@@ -97,6 +114,8 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     keycloak_post_logout_redirect_uris: list[str] | None = None
     keycloak_default_client_scopes: list[str] | None = None
     keycloak_optional_client_scopes: list[str] | None = None
+    keycloak_roles: list[str] | None = None
+    keycloak_users: list[dict[str, str]] | None = None
 
 
 def parse_bool_env(name: str, default: bool = False) -> bool:
@@ -134,6 +153,40 @@ def parse_user_profiles_env(name: str) -> list[str] | None:
     return usernames or None
 
 
+def parse_users_env(name: str) -> list[dict[str, str]] | None:
+    """Parse KEYCLOAK_USERS JSON array of {username, password, role} objects."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Invalid JSON value for {name}. "
+            "Expected array of {{username, password, role}} objects."
+        ) from exc
+
+    if not isinstance(loaded, list):
+        raise RuntimeError(f"Invalid value for {name}. Expected JSON array.")
+
+    users = []
+    for item in loaded:
+        if not isinstance(item, dict) or "username" not in item or "password" not in item:
+            raise RuntimeError(
+                f"Each entry in {name} must have at least 'username' and 'password'."
+            )
+        users.append({
+            "username": str(item["username"]).strip(),
+            "password": str(item["password"]),
+            "role": str(item.get("role", "")).strip(),
+            "email": str(item.get("email", "")).strip(),
+            "firstName": str(item.get("firstName", "")).strip(),
+            "lastName": str(item.get("lastName", "")).strip(),
+        })
+    return users or None
+
+
 def parse_csv_env(name: str) -> list[str] | None:
     """Parse comma-separated values from environment into a list."""
     raw = os.getenv(name)
@@ -164,6 +217,8 @@ class KeycloakRestConfigurator:
     def run(self) -> None:
         """Run the full claims-configuration workflow."""
         token = self.get_access_token()
+        self.ensure_realm(token)
+        self.ensure_client(token)
         client_uuid = self.get_client_uuid(token)
         self.ensure_client_auth_settings(token, client_uuid)
         if self.settings.keycloak_use_shared_scope:
@@ -179,6 +234,8 @@ class KeycloakRestConfigurator:
         for mapper in self._client_mappers():
             self.ensure_mapper_on_client(token, client_uuid, mapper)
 
+        self.ensure_realm_roles(token)
+        self.ensure_users(token)
         self.ensure_user_profile_mappers(token)
         self.update_user_profiles(token)
 
@@ -358,6 +415,167 @@ class KeycloakRestConfigurator:
 
 
 
+    def ensure_users(self, token: str) -> None:
+        """Ensure configured users exist in the realm with their assigned roles.
+
+        Users are taken from settings.keycloak_users, a list of dicts with:
+          username  — Keycloak username
+          password  — initial password (set as non-temporary)
+          role      — realm role to assign (e.g. dtaas-admin, dtaas-user)
+        Existing users are left unchanged; only missing ones are created.
+        Role assignment is always re-applied in case it was missing.
+        """
+        users = self.settings.keycloak_users
+        if not users:
+            return
+
+        realm = self.settings.keycloak_realm
+        users_endpoint = f"{self.admin_url}/{realm}/users"
+        roles_endpoint = f"{self.admin_url}/{realm}/roles"
+
+        # Build a cache of existing usernames → user id
+        existing: dict[str, str] = {}
+        first = 0
+        while True:
+            page = self._request_json(
+                f"{users_endpoint}?first={first}&max={PAGE_SIZE}", token=token
+            )
+            if not page:
+                break
+            for u in page:
+                if u.get("username") and u.get("id"):
+                    existing[u["username"]] = u["id"]
+            if len(page) < PAGE_SIZE:
+                break
+            first += PAGE_SIZE
+
+        # Build a cache of role name → {id, name} for role assignment
+        role_cache: dict[str, dict[str, str]] = {}
+
+        for user in users:
+            username = user["username"]
+            password = user["password"]
+            role_name = user["role"]
+
+            # Create user if missing
+            if username not in existing:
+                user_payload: dict[str, Any] = {
+                    "username": username,
+                    "enabled": True,
+                    "credentials": [
+                        {
+                            "type": "password",
+                            "value": password,
+                            "temporary": False,
+                        }
+                    ],
+                }
+                if user.get("email"):
+                    user_payload["email"] = user["email"]
+                if user.get("firstName"):
+                    user_payload["firstName"] = user["firstName"]
+                if user.get("lastName"):
+                    user_payload["lastName"] = user["lastName"]
+                self._request_empty_or_log(
+                    users_endpoint,
+                    method="POST",
+                    json_data=user_payload,
+                    token=token,
+                    description=f"Create user '{username}'",
+                )
+                if not self.dry_run:
+                    # Re-fetch to get the new user's id
+                    query = urlencode({"username": username, "exact": "true"})
+                    results = self._request_json(
+                        f"{users_endpoint}?{query}", token=token
+                    )
+                    for u in results:
+                        if u.get("username") == username and u.get("id"):
+                            existing[username] = u["id"]
+                            break
+
+            if not role_name:
+                continue
+
+            user_id = existing.get(username)
+            if not user_id:
+                continue  # dry-run or creation failed
+
+            # Resolve role representation (id + name required by Keycloak API)
+            if role_name not in role_cache:
+                try:
+                    role_rep = self._request_json(
+                        f"{roles_endpoint}/{role_name}", token=token
+                    )
+                    role_cache[role_name] = {
+                        "id": role_rep["id"],
+                        "name": role_rep["name"],
+                    }
+                except RuntimeError:
+                    print(
+                        f"Warning: realm role '{role_name}' not found — "
+                        f"skipping role assignment for '{username}'",
+                        file=sys.stderr,
+                    )
+                    continue
+
+            # Assign role (Keycloak ignores duplicates)
+            self._request_empty_or_log(
+                f"{users_endpoint}/{user_id}/role-mappings/realm",
+                method="POST",
+                json_data=[role_cache[role_name]],
+                token=token,
+                description=f"Assign role '{role_name}' to user '{username}'",
+            )
+
+    def ensure_realm(self, token: str) -> None:
+        """Ensure the target realm exists, creating it if missing."""
+        realm = self.settings.keycloak_realm
+        try:
+            self._request_json(f"{self.admin_url}/{realm}", token=token)
+            return  # realm already exists
+        except RuntimeError as exc:
+            if "HTTP 404" not in str(exc):
+                raise
+
+        self._request_empty_or_log(
+            self.admin_url,
+            method="POST",
+            json_data={"realm": realm, "enabled": True},
+            token=token,
+            description=f"Create realm '{realm}'",
+        )
+
+    def ensure_client(self, token: str) -> None:
+        """Ensure the target client exists in the realm, creating it if missing."""
+        realm = self.settings.keycloak_realm
+        client_id = self.settings.keycloak_client_id
+        query = urlencode({"clientId": client_id})
+        clients = self._request_json(
+            f"{self.admin_url}/{realm}/clients?{query}",
+            token=token,
+        )
+        if any(c.get("clientId") == client_id for c in clients):
+            return  # client already exists
+
+        self._request_empty_or_log(
+            f"{self.admin_url}/{realm}/clients",
+            method="POST",
+            json_data={
+                "clientId": client_id,
+                "protocol": "openid-connect",
+                "publicClient": self.settings.keycloak_public_client,
+                "standardFlowEnabled": self.settings.keycloak_standard_flow_enabled,
+                "redirectUris": self.settings.keycloak_redirect_uris or [],
+                "webOrigins": self.settings.keycloak_web_origins or [],
+                "attributes": {
+                    "pkce.code.challenge.method": self.settings.keycloak_pkce_method,
+                },
+            },
+            token=token,
+            description=f"Create client '{client_id}' in realm '{realm}'",
+        )
+
     def get_access_token(self) -> str:
         """Get an admin token using service account or username/password."""
         if self.settings.keycloak_admin_client_id:
@@ -527,6 +745,41 @@ class KeycloakRestConfigurator:
             token=token,
             description=f"Create client mapper '{mapper['name']}'",
         )
+
+    def ensure_realm_roles(self, token: str) -> None:
+        """Ensure RBAC realm roles exist in the realm.
+
+        Roles to create are taken from settings.keycloak_roles.
+        Defaults to the three DTaaS roles when not configured:
+          dtaas-admin   — full access to any workspace (cross-user)
+          dtaas-user    — full access to own workspace
+          dtaas-viewer  — read-only access to own workspace
+        Existing roles are left unchanged; only missing ones are created.
+        """
+        _role_descriptions: dict[str, str] = {
+            "dtaas-admin": "Full access to any workspace (cross-user)",
+            "dtaas-user": "Full access to own workspace",
+            "dtaas-viewer": "Read-only access to own workspace",
+        }
+        roles = self.settings.keycloak_roles or list(_role_descriptions)
+        endpoint = f"{self.admin_url}/{self.settings.keycloak_realm}/roles"
+
+        existing = self._request_json(endpoint, token=token)
+        existing_names = {r.get("name") for r in existing if r.get("name")}
+
+        for role_name in roles:
+            if role_name in existing_names:
+                continue
+            self._request_empty_or_log(
+                endpoint,
+                method="POST",
+                json_data={
+                    "name": role_name,
+                    "description": _role_descriptions.get(role_name, ""),
+                },
+                token=token,
+                description=f"Create realm role '{role_name}'",
+            )
 
     def ensure_user_profile_mappers(self, token: str) -> None:
         """Ensure user-profile metadata exists for attributes mapped from user model."""
@@ -771,6 +1024,8 @@ def settings_from_env() -> Settings:
         keycloak_optional_client_scopes=parse_csv_env(
             "KEYCLOAK_OPTIONAL_CLIENT_SCOPES"
         ),
+        keycloak_roles=parse_csv_env("KEYCLOAK_ROLES"),
+        keycloak_users=parse_users_env("KEYCLOAK_USERS"),
     )
 
 

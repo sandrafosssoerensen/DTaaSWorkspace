@@ -18,9 +18,12 @@ Browser
 Traefik  ──ForwardAuth──>  Oathkeeper (JWT validation)
                                   |
                                   v
+                           opa-proxy (nginx, 404→403 adapter)
+                                  |
+                                  v
                              OPA (path policy)
                                   |
-                                  v (allow)
+                                  v (allow → 200, deny → 404→403)
                            Workspace service
 ```
 
@@ -28,8 +31,9 @@ Traefik  ──ForwardAuth──>  Oathkeeper (JWT validation)
 
 | Component | Image | Port | Role |
 |---|---|---|---|
-| Oathkeeper | `oryd/oathkeeper:v0.40.8` | 4455 (proxy), 4456 (decision API) | JWT verification, auth orchestration |
-| OPA | `openpolicyagent/opa:0.70.0` | 8181 | Per-user path authorization |
+| Oathkeeper | `oryd/oathkeeper:v26.2.0` | 4455 (proxy), 4456 (decision API) | JWT verification, auth orchestration |
+| opa-proxy | `nginx:alpine` | 8080 | Converts OPA's 404 deny response to 403 |
+| OPA | `openpolicyagent/opa:1.15.2` | 8181 | Per-user RBAC path authorization |
 
 ## Configuration Files
 
@@ -39,7 +43,8 @@ All files live in `workspaces/test/dtaas/oathkeeper/`:
 |---|---|
 | `oathkeeper.yml` | Main Oathkeeper config: ports, authenticators, authorizers, mutators |
 | `access-rules.yml` | URL matching rules mapping routes to authenticators and authorizers |
-| `policy.rego` | Rego policy evaluated by OPA for authorization decisions |
+| `policy.rego` | Rego RBAC policy evaluated by OPA for authorization decisions |
+| `opa-proxy.nginx.conf` | nginx config for the opa-proxy 404→403 adapter |
 
 ## Environment Variables
 
@@ -51,73 +56,126 @@ Set in the `oathkeeper` service in the compose file (derived from `.env`):
 | `KEYCLOAK_ISSUER_URL` | Public Keycloak issuer URL — must match the `iss` claim in JWTs | `http://localhost/auth/realms/dtaas` |
 | `KEYCLOAK_TARGET_AUDIENCE` | Required `aud` claim in access tokens | `dtaas-workspace` |
 
-> **Note:** Oathkeeper v0.40.8 does not expand `${VAR}` placeholders in its
-> YAML config at runtime. The compose files use a `sh -c sed` wrapper to
-> substitute these variables before starting the server.
+> **Note:** Oathkeeper does not expand `${VAR}` placeholders in its YAML config
+> at runtime. The compose files use a `sh -c sed` wrapper to substitute these
+> variables before starting the server.
 
 ## Decision Flow
 
-1. Browser sends `Authorization: Bearer <access_token>` to a workspace route.
+1. Browser sends a request (with `dtaas_access_token` cookie) to a workspace route.
 2. Traefik's `oathkeeper-auth` ForwardAuth middleware forwards the request
    to `http://oathkeeper:4456/decisions`.
 3. Oathkeeper matches the URL against `access-rules.yml`.
-4. The `jwt` authenticator fetches Keycloak's public keys from `KEYCLOAK_JWKS_URL`
-   and verifies the token signature, issuer, audience, and expiry.
-5. If the token is valid, Oathkeeper calls OPA at
-   `http://opa:8181/v0/data/workspace/authz/allow` with the JWT claims and
-   request context as input.
-6. OPA evaluates `policy.rego` and returns HTTP 200 (allow) or HTTP 404 (deny).
-7. On allow, Oathkeeper returns HTTP 200 and Traefik forwards the request to
-   the workspace. The `X-User-Name` and `X-User-Subject` headers are injected.
-8. On deny, Traefik returns HTTP 403 to the browser.
+4. The `jwt` authenticator reads the JWT from the `dtaas_access_token` cookie,
+   fetches Keycloak's public keys from `KEYCLOAK_JWKS_URL`, and verifies the
+   token signature, issuer, audience, and expiry.
+5. If the token is valid, Oathkeeper calls `http://opa-proxy:8080/v0/data/workspace/authz/allow`
+   with the JWT claims and request context as raw JSON input.
+6. `opa-proxy` (nginx) forwards the request to OPA (`http://opa:8181/...`).
+7. OPA evaluates `policy.rego` and returns HTTP 200 (allow) or HTTP 404 (deny).
+8. `opa-proxy` passes through 200 unchanged and converts 404 → 403.
+9. Oathkeeper sees 200 (allow) or 403 (deny). On 403, it returns
+   `ErrForbidden` and the client gets HTTP 403. On 200, Oathkeeper injects
+   `X-User-Name`, `X-User-Subject`, and `X-User-Groups` headers and returns 200
+   so Traefik forwards the request to the workspace.
 
-> **Why `/v0/data/` and not `/v1/data/`?**
-> Oathkeeper's `remote_json` authorizer only checks the HTTP status code of the
-> response — it does not read the response body. OPA's `/v1/data/` endpoint
-> always returns HTTP 200 regardless of the policy result, putting the outcome
-> in the body as `{"result": true}` or `{"result": false}`. This means
-> Oathkeeper would see HTTP 200 for both allow and deny, and grant every
-> request. OPA's `/v0/data/` endpoint is designed for exactly this integration:
-> it returns HTTP 200 on allow and HTTP 404 on deny, giving Oathkeeper a
-> meaningful status code to enforce on.
+> **Why the opa-proxy adapter?**
+> Oathkeeper's `remote_json` authorizer returns `ErrForbidden` (403) only
+> when the remote endpoint responds with HTTP 403. For any other non-200 status
+> (including OPA's 404), it raises a plain internal error and returns HTTP 500 to
+> the client. The `opa-proxy` nginx adapter sits between Oathkeeper and OPA and
+> converts OPA's 404 deny response to 403, so Oathkeeper follows the correct
+> ErrForbidden path.
+>
+> OPA's `/v0/data/` endpoint is used (not `/v1/data/`) because it returns HTTP 200
+> for allow and HTTP 404 for deny (undefined), giving a meaningful status code.
+> The `/v1/data/` endpoint always returns HTTP 200 with the result in the body
+> (`{"result": true/false}`), but `remote_json` does not read the response body —
+> it only checks the status code — so v1 would grant every request.
 
-## OPA Authorization Policy
+## OPA Authorization Policy (RBAC)
 
-The current policy in `policy.rego` enforces one condition:
+The policy in `policy.rego` enforces role-based access control using Keycloak
+realm roles emitted as a flat `roles` array in the JWT access token:
 
-1. **Path isolation**: the `preferred_username` JWT claim must match the first
-   path segment of the URL.
+| Role | Access |
+|---|---|
+| `dtaas-admin` | Full access to any workspace path (cross-user) |
+| `dtaas-user` | Full access to own workspace only (all HTTP methods) |
+| `dtaas-viewer` | Read-only access to own workspace (GET/HEAD/OPTIONS only) |
+
+Path ownership is determined by matching the JWT `preferred_username` claim
+against the first URL path segment:
 
 ```
 /user1/tools/vscode  →  preferred_username must equal "user1"
 /user2/lab/          →  preferred_username must equal "user2"
 ```
 
-This means:
-
-- A legitimate user cannot access another user's workspace.
-
-The `preferred_username` claim is injected by Keycloak via protocol mappers.
-See [KEYCLOAK_SETUP.md](KEYCLOAK_SETUP.md) for mapper configuration.
+The `preferred_username` and `roles` claims are emitted by Keycloak via protocol
+mappers configured by `configure_keycloak_rest.py`.
 
 ### Testing the Policy Manually
 
-With OPA running, test allow/deny decisions directly:
+OPA's `/v0/data/` endpoint takes the raw input document — do **not** wrap in
+`{"input": ...}` (that is the v1 format). Use `-w "%{http_code}"` to check the
+HTTP status code: 200 = allow, 404 = deny.
 
 ```bash
-# Allow: user1 accessing /user1/tools/vscode
-curl -s http://localhost:8181/v1/data/workspace/authz/allow \
+# Allow: user1 (dtaas-user) accessing /user1/lab
+curl -s -o /dev/null -w "%{http_code}" \
+  -X POST http://localhost:8181/v0/data/workspace/authz/allow \
   -H "Content-Type: application/json" \
-   -d '{"input": {"extra": {"preferred_username": "user1"},
-        "url": {"path": "/user1/tools/vscode"}}}'
-# Expected: {"result": true}
+  -d '{"subject":"user1","extra":{"preferred_username":"user1","roles":["dtaas-user"]},"url":{"path":"/user1/lab"},"method":"GET"}'
+# Expected: 200
 
-# Deny: user1 accessing /user2/tools/vscode
-curl -s http://localhost:8181/v1/data/workspace/authz/allow \
+# Deny: user1 accessing user2's workspace
+curl -s -o /dev/null -w "%{http_code}" \
+  -X POST http://localhost:8181/v0/data/workspace/authz/allow \
   -H "Content-Type: application/json" \
-   -d '{"input": {"extra": {"preferred_username": "user1"},
-        "url": {"path": "/user2/tools/vscode"}}}'
-# Expected: {"result": false}
+  -d '{"subject":"user1","extra":{"preferred_username":"user1","roles":["dtaas-user"]},"url":{"path":"/user2/lab"},"method":"GET"}'
+# Expected: 404
+
+# Allow: admin (dtaas-admin) accessing user2's workspace
+curl -s -o /dev/null -w "%{http_code}" \
+  -X POST http://localhost:8181/v0/data/workspace/authz/allow \
+  -H "Content-Type: application/json" \
+  -d '{"subject":"sandra","extra":{"preferred_username":"sandra","roles":["dtaas-admin"]},"url":{"path":"/user2/lab"},"method":"GET"}'
+# Expected: 200
+
+# Allow: viewer (dtaas-viewer) reading own workspace
+curl -s -o /dev/null -w "%{http_code}" \
+  -X POST http://localhost:8181/v0/data/workspace/authz/allow \
+  -H "Content-Type: application/json" \
+  -d '{"subject":"user1","extra":{"preferred_username":"user1","roles":["dtaas-viewer"]},"url":{"path":"/user1/lab"},"method":"GET"}'
+# Expected: 200
+
+# Deny: viewer writing to own workspace
+curl -s -o /dev/null -w "%{http_code}" \
+  -X POST http://localhost:8181/v0/data/workspace/authz/allow \
+  -H "Content-Type: application/json" \
+  -d '{"subject":"user1","extra":{"preferred_username":"user1","roles":["dtaas-viewer"]},"url":{"path":"/user1/lab"},"method":"POST"}'
+# Expected: 404
+```
+
+### Testing the opa-proxy Adapter
+
+After adding `opa-proxy`, verify it correctly converts 404 → 403:
+
+```bash
+# Should return 403 (proxy converted OPA's 404 deny to 403)
+curl -s -o /dev/null -w "%{http_code}" \
+  -X POST http://localhost:8080/v0/data/workspace/authz/allow \
+  -H "Content-Type: application/json" \
+  -d '{"subject":"user1","extra":{"preferred_username":"user1","roles":["dtaas-user"]},"url":{"path":"/user2/lab"},"method":"GET"}'
+# Expected: 403
+
+# Should return 200 (allow passes through unchanged)
+curl -s -o /dev/null -w "%{http_code}" \
+  -X POST http://localhost:8080/v0/data/workspace/authz/allow \
+  -H "Content-Type: application/json" \
+  -d '{"subject":"user1","extra":{"preferred_username":"user1","roles":["dtaas-user"]},"url":{"path":"/user1/lab"},"method":"GET"}'
+# Expected: 200
 ```
 
 ## Traefik Middleware Configuration
@@ -127,7 +185,7 @@ the compose file:
 
 ```yaml
 - "traefik.http.middlewares.oathkeeper-auth.forwardauth.address=http://oathkeeper:4456/decisions"
-- "traefik.http.middlewares.oathkeeper-auth.forwardauth.authResponseHeaders=X-User-Name,X-User-Subject"
+- "traefik.http.middlewares.oathkeeper-auth.forwardauth.authResponseHeaders=X-User-Name,X-User-Subject,X-User-Groups"
 - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authRequestHeaders=Authorization,Cookie"
 ```
 

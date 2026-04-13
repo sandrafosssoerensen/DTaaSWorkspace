@@ -17,10 +17,10 @@ The `compose.traefik.secure.yml` file sets up:
 - **Traefik** reverse proxy on port 80
 - **Keycloak** identity provider with OIDC support
 - **Ory Oathkeeper** for JWT verification and auth decisioning
-- **OPA (Open Policy Agent)** for per-user path authorization policies
-- **client** - DTaaS web interface
-- **user1** workspace using the workspace image
-- **user2** workspace using the mltooling/ml-workspace-minimal image
+- **opa-proxy** nginx adapter that converts OPA's 404 deny response to 403
+- **OPA (Open Policy Agent)** for RBAC path authorization (roles: dtaas-admin, dtaas-user, dtaas-viewer)
+- **client** — DTaaS web interface
+- **user1**, **user2**, **admin** workspaces
 - Two Docker networks: `dtaas-frontend` and `dtaas-users`
 
 ## ⚙️ Initial Configuration
@@ -71,52 +71,42 @@ This will:
 
 **Note**: First-time startup may take a few minutes for Keycloak to initialize.
 
-## :gear: Configure Keycloak
+## :gear: Configure Keycloak (Automated)
 
-After starting the services, you need to configure Keycloak. See [KEYCLOAK_SETUP.md](KEYCLOAK_SETUP.md) for detailed instructions.
+Keycloak setup — realm, OIDC client, realm roles, and users — is fully
+automated. Use the reset script with the `-RunConfigurator` flag:
 
-Quick steps:
+```powershell
+.\scripts\reset-dtaas.ps1 -RunConfigurator
+```
 
-1. For non-`localhost` scenarios, **Disable SSL requirement** on the new realm (see below)
-2. Access Keycloak at `http://<SERVER_DNS>/auth`
-3. Login with admin credentials from `.env`
-4. Create a realm named `dtaas` (or match your `KEYCLOAK_REALM`)
-5. Create an OIDC client named `dtaas-workspace`
-6. Create users in Keycloak
-7. Update `.env` with the client secret
-8. Restart services
+This tears down any existing stack, starts fresh, and runs
+`keycloak/configure_keycloak_rest.py` which creates:
 
-### Disable Realm SSL Requirement (HTTP only)
+- **Realm** `dtaas` (if missing)
+- **OIDC client** `dtaas-workspace` — public PKCE client, no secret required
+- **Realm roles**: `dtaas-admin`, `dtaas-user`, `dtaas-viewer`
+- **Users** from `KEYCLOAK_USERS` in `.env` with passwords and role assignments
+- **Protocol mappers**: `preferred_username`, `roles` (realm roles), audience
 
-Keycloak defaults all realms to `sslRequired=external`, which rejects HTTP
-requests arriving from non-localhost addresses. Since this composition runs
-over plain HTTP behind Traefik, you must disable the SSL requirement for
-the **master** realm and any new realm you create.
+No manual Keycloak console steps are required.
 
-Using the Keycloak CLI inside the container:
+### Disable Realm SSL Requirement (HTTP only, if running manually)
+
+If you start services without the reset script and Keycloak shows
+"HTTPS Required", disable SSL on both realms via the CLI:
 
 ```bash
-# Authenticate to the Keycloak admin CLI
 docker exec dtaas-keycloak-1 /opt/keycloak/bin/kcadm.sh \
   config credentials --server http://localhost:8080/auth \
   --realm master --user <KEYCLOAK_ADMIN> --password <KEYCLOAK_ADMIN_PASSWORD>
 
-# Disable SSL on the master realm
 docker exec dtaas-keycloak-1 /opt/keycloak/bin/kcadm.sh \
   update realms/master -s sslRequired=NONE
 
-# Disable SSL on the dtaas realm (after creating it)
 docker exec dtaas-keycloak-1 /opt/keycloak/bin/kcadm.sh \
   update realms/dtaas -s sslRequired=NONE
 ```
-
-Replace `<KEYCLOAK_ADMIN>` and `<KEYCLOAK_ADMIN_PASSWORD>` with the values
-from your `.env` file.
-
-Alternatively, you can do this via the Keycloak Admin Console:
-1. Go to **Realm Settings** → **General**
-2. Set **Require SSL** to **None**
-3. Save. Repeat for each realm.
 
 ## :technologist: Accessing Workspaces
 
@@ -345,10 +335,10 @@ If Keycloak displays "We are sorry... HTTPS required" when accessed via HTTP:
 If you're stuck in an authentication loop:
 
 1. Clear browser cookies for localhost
-2. Verify your browser sends `Authorization: Bearer <access_token>` requests
-3. Ensure `KEYCLOAK_ISSUER_URL` and `KEYCLOAK_JWKS_URL` are correct
-4. Check Oathkeeper logs for JWT validation errors
-5. Check OPA logs for authorization denials
+2. Ensure `KEYCLOAK_ISSUER_URL` and `KEYCLOAK_JWKS_URL` are correct
+3. Check Oathkeeper logs for JWT validation errors
+4. Check OPA logs for authorization decisions
+5. Check opa-proxy logs for unexpected status codes
 
 ### Services Not Accessible
 
@@ -362,9 +352,9 @@ If you're stuck in an authentication loop:
    docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml logs traefik
    ```
 
-3. Check Oathkeeper and OPA logs:
+3. Check Oathkeeper, opa-proxy, and OPA logs:
    ```bash
-  docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml logs oathkeeper opa
+   docker compose -f workspaces/test/dtaas/compose.traefik.secure.yml logs oathkeeper opa-proxy opa
    ```
 
 ### OIDC/OAuth Errors

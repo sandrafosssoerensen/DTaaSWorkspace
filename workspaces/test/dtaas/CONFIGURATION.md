@@ -48,7 +48,7 @@ cp config/.env.example config/.env
 
 The usernames of the main users for the workspaces can be changed in
 the [environment variable file](#-environment) `config/.env`.
-Change the default values (`user1` and `user2`) to your desired usernames:
+Change the default values to your desired usernames:
 
 ```bash
 # Username Configuration
@@ -56,6 +56,7 @@ Change the default values (`user1` and `user2`) to your desired usernames:
 # Example: http://localhost/user1, http://localhost/user2
 USERNAME1=user1
 USERNAME2=user2
+USERNAME_ADMIN=sandra   # Admin workspace service (dtaas-admin role)
 ```
 
 ## 📁 User Directories
@@ -212,14 +213,16 @@ Quick overview:
    # Keycloak Realm
    KEYCLOAK_REALM=dtaas
 
-   # Keycloak Client Credentials (obtain from Keycloak after creating client)
+   # Keycloak Client ID — public PKCE client (no secret required)
    KEYCLOAK_CLIENT_ID=dtaas-workspace
-   KEYCLOAK_CLIENT_SECRET=your_client_secret_here
 
-   # Keycloak Issuer URL
-   KEYCLOAK_ISSUER_URL=http://keycloak:8080/auth/realms/dtaas
+   # Keycloak Issuer URL — must match the 'iss' claim in JWTs exactly
+   # HTTP:  http://<SERVER_DNS>/auth/realms/<KEYCLOAK_REALM>
+   # HTTPS: https://<SERVER_DNS>/auth/realms/<KEYCLOAK_REALM>
+   KEYCLOAK_ISSUER_URL=http://localhost/auth/realms/dtaas
 
-   # Secret key for encrypting OAuth session data
-   # Generate a random string (at least 16 characters)
-   OAUTH_SECRET=$(openssl rand -base64 32)
+   # Users to provision automatically (JSON array)
+   KEYCLOAK_USERS=[{"username":"user1","password":"user1","role":"dtaas-user","email":"user1@example.com","firstName":"User","lastName":"One"}]
    ```
+
+   > **No client secret**: the DTaaS SPA uses PKCE (public client). `KEYCLOAK_CLIENT_SECRET` is not used.

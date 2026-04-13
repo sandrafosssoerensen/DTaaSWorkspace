@@ -13,6 +13,7 @@ This is document containing how the userinfo payload is expected by DTaaS.
   "preferred_username": "alice",
   "profile": "https://foo.com/users/alice",
   "picture": "https://secure.gravatar.com/avatar/xxx?s=80&d=identicon",
+  "roles": ["dtaas-user"],
   "groups": ["dtaas"],
   "https://dtaas-digitaltwin.com/claims/groups/owner": ["dtaas"]
 }
@@ -23,22 +24,28 @@ Notes:
 - `name`, `nickname`, `preferred_username`, and `picture` come from standard OIDC scopes.
 - `sub_legacy` is a custom user attribute mapper.
 - `profile` is a custom user attribute mapper.
+- `roles` is an `oidc-usermodel-realm-role-mapper` emitting Keycloak realm roles as a flat
+  array in the **access token** (required by OPA RBAC policy). Valid values: `dtaas-admin`,
+  `dtaas-user`, `dtaas-viewer`.
 - `groups` and `https://dtaas-digitaltwin.com/claims/groups/owner` are group membership mappers.
 
 ## Mapper Configuration (Shared Client Scope)
 
 Required custom mappers in the shared scope:
+- `roles`:
+  `oidc-usermodel-realm-role-mapper`, `claim.name=roles`, **access token and userinfo**, multivalued.
+  (`access.token.claim=true` required so OPA RBAC policy can read the `roles` array from the JWT directly.)
+  Valid values emitted: `dtaas-admin`, `dtaas-user`, `dtaas-viewer`.
 - `profile`:
   `oidc-usermodel-attribute-mapper`, `user.attribute=profile`, `claim.name=profile`, userinfo only.
 - `sub_legacy`:
   `oidc-usermodel-attribute-mapper`, `user.attribute=sub_legacy`, `claim.name=sub_legacy`, userinfo only.
 - `groups`:
-  `oidc-group-membership-mapper`, `claim.name=groups`, **access token and userinfo**, multivalued.
-  (`access.token.claim=true` required so OPA policy can read groups from the JWT directly.)
+  `oidc-group-membership-mapper`, `claim.name=groups`, access token and userinfo, multivalued.
 - `groups_owner`:
   `oidc-group-membership-mapper`, `claim.name=https://dtaas-digitaltwin.com/claims/groups/owner`, userinfo only, multivalued.
 - `audience`:
-  `oidc-audience-mapper`, `included.client.audience=dtaas-client`, **access token only**.
+  `oidc-audience-mapper`, `included.client.audience=dtaas-workspace`, **access token only**.
   (Required so Oathkeeper's `target_audience` check passes — Keycloak does not include the
   client ID in `aud` by default.)
 
