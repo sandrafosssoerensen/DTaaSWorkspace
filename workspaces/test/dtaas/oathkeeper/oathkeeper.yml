@@ -3,7 +3,8 @@
 # by Keycloak and injects user identity headers (X-User-Name, X-User-Subject,
 # X-User-Groups) for upstream services.
 # Fine-grained RBAC authorization is handled separately by OPA via workspace nginx.
-# Traefik ForwardAuth calls the decision API at http://oathkeeper:4456/decisions.
+# Traefik routes workspace paths to the Oathkeeper proxy port (4455).
+# Oathkeeper validates the JWT and proxies to the upstream workspace service.
 
 serve:
   proxy:
@@ -23,9 +24,19 @@ log:
   format: json
 
 errors:
+  # All unauthorized/forbidden errors redirect to the login-relay, which
+  # initiates a Keycloak PKCE flow and returns the user to their original
+  # destination after login.
   fallback:
-    - json
+    - redirect
   handlers:
+    redirect:
+      enabled: true
+      config:
+        to: "${LOGIN_RELAY_URL}"
+        # Append the original request URL as ?return_to=<url> so the login-relay
+        # can redirect the user back to their workspace after Keycloak login.
+        return_to_query_param: return_to
     json:
       enabled: true
       config:

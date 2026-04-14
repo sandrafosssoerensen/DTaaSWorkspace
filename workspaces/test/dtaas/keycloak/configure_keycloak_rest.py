@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import ssl
 import sys
 from dataclasses import dataclass
 from typing import Any
@@ -117,6 +118,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     keycloak_optional_client_scopes: list[str] | None = None
     keycloak_roles: list[str] | None = None
     keycloak_users: list[dict[str, str]] | None = None
+    insecure_tls: bool = False
 
 
 def parse_bool_env(name: str, default: bool = False) -> bool:
@@ -214,6 +216,12 @@ class KeycloakRestConfigurator:
             f"{settings.keycloak_base_url}{normalize_path(settings.keycloak_context_path)}"
         )
         self.admin_url = f"{self.server_url}/admin/realms"
+        if settings.insecure_tls:
+            self._ssl_context: ssl.SSLContext | None = ssl.create_default_context()
+            self._ssl_context.check_hostname = False
+            self._ssl_context.verify_mode = ssl.CERT_NONE
+        else:
+            self._ssl_context = None
 
     def run(self) -> None:
         """Run the full claims-configuration workflow."""
@@ -904,7 +912,7 @@ class KeycloakRestConfigurator:
         request = Request(url, method=method, headers=headers, data=data)
         try:
             # noqa: S310 - explicit admin URL target
-            with urlopen(request, timeout=30) as response:
+            with urlopen(request, timeout=30, context=self._ssl_context) as response:
                 raw_body = response.read()
                 if not raw_body:
                     return {}
@@ -1031,6 +1039,7 @@ def settings_from_env() -> Settings:
         ),
         keycloak_roles=parse_csv_env("KEYCLOAK_ROLES"),
         keycloak_users=parse_users_env("KEYCLOAK_USERS"),
+        insecure_tls=parse_bool_env("KEYCLOAK_INSECURE_TLS", False),
     )
 
 

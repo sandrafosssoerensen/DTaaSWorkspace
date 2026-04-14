@@ -1,3 +1,5 @@
+name: dtaas
+
 services:
   traefik:
     image: traefik:v3.6.4
@@ -103,7 +105,8 @@ services:
       - "traefik.http.routers.u1.entryPoints=web-secure"
       - "traefik.http.routers.u1.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME1:-user1}`)"
       - "traefik.http.routers.u1.tls=true"
-      - "traefik.http.routers.u1.middlewares=oathkeeper-auth"
+      # Route directly to Oathkeeper proxy — no forwardauth middleware.
+      - "traefik.http.routers.u1.service=oathkeeper-proxy@docker"
     networks:
       - users
 
@@ -121,7 +124,8 @@ services:
       - "traefik.http.routers.u2.entryPoints=web-secure"
       - "traefik.http.routers.u2.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME2:-user2}`)"
       - "traefik.http.routers.u2.tls=true"
-      - "traefik.http.routers.u2.middlewares=oathkeeper-auth"
+      # Route directly to Oathkeeper proxy — no forwardauth middleware.
+      - "traefik.http.routers.u2.service=oathkeeper-proxy@docker"
     networks:
       - users
 
@@ -141,15 +145,18 @@ services:
       - "traefik.http.routers.admin.entryPoints=web-secure"
       - "traefik.http.routers.admin.rule=Host(`${SERVER_DNS:-localhost}`) && PathPrefix(`/${USERNAME_ADMIN:-sandra}`)"
       - "traefik.http.routers.admin.tls=true"
-      - "traefik.http.routers.admin.middlewares=oathkeeper-auth"
+      # Route directly to Oathkeeper proxy — no forwardauth middleware.
+      - "traefik.http.routers.admin.service=oathkeeper-proxy@docker"
     networks:
       - users
 
   oathkeeper:
     image: oryd/oathkeeper:v26.2.0
     restart: unless-stopped
-    # Serve both the proxy (4455) and the decision API (4456).
-    # Traefik ForwardAuth calls the decision API at http://oathkeeper:4456/decisions.
+    # Proxy port 4455: Traefik routes workspace paths here. Oathkeeper validates
+    # the JWT and proxies valid requests to the upstream workspace container.
+    # On auth failure it redirects browsers to the login-relay (Keycloak PKCE).
+    # Decision API port 4456: kept available for internal use / debugging.
     entrypoint:
       - /bin/sh
       - -c
@@ -159,36 +166,62 @@ services:
           -e 's|$${KEYCLOAK_JWKS_URL}|'"$$KEYCLOAK_JWKS_URL"'|g' \
           -e 's|$${KEYCLOAK_ISSUER_URL}|'"$$KEYCLOAK_ISSUER_URL"'|g' \
           -e 's|$${KEYCLOAK_TARGET_AUDIENCE}|'"$$KEYCLOAK_TARGET_AUDIENCE"'|g' \
+          -e 's|$${LOGIN_RELAY_URL}|'"$$LOGIN_RELAY_URL"'|g' \
           /etc/oathkeeper/config/oathkeeper.yml > /tmp/oathkeeper.yml &&
         sed \
-          -e 's|$${KEYCLOAK_JWKS_URL}|'"$$KEYCLOAK_JWKS_URL"'|g' \
-          -e 's|$${KEYCLOAK_ISSUER_URL}|'"$$KEYCLOAK_ISSUER_URL"'|g' \
-          -e 's|$${KEYCLOAK_TARGET_AUDIENCE}|'"$$KEYCLOAK_TARGET_AUDIENCE"'|g' \
+          -e 's|$${USERNAME1}|'"$$USERNAME1"'|g' \
+          -e 's|$${USERNAME2}|'"$$USERNAME2"'|g' \
+          -e 's|$${USERNAME_ADMIN}|'"$$USERNAME_ADMIN"'|g' \
           /etc/oathkeeper/config/access-rules.yml > /tmp/access-rules.yml &&
         oathkeeper serve -c /tmp/oathkeeper.yml
     volumes:
       - "./oathkeeper:/etc/oathkeeper/config"
     environment:
-      # Internal Keycloak JWKS URL (container-to-container, always HTTP).
-      # Oathkeeper fetches public signing keys here to verify JWT signatures.
       - KEYCLOAK_JWKS_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-dtaas}/protocol/openid-connect/certs
-      # Public Keycloak issuer URL. Must match exactly the 'iss' claim in JWTs.
-      # In TLS mode, Keycloak sets KC_HOSTNAME to https://<SERVER_DNS>/auth,
-      # so the issuer in issued tokens is https://<SERVER_DNS>/auth/realms/<realm>.
       - KEYCLOAK_ISSUER_URL=https://${SERVER_DNS:-localhost}/auth/realms/${KEYCLOAK_REALM:-dtaas}
-      # Required audience ('aud' claim) in JWT access tokens.
       - KEYCLOAK_TARGET_AUDIENCE=${KEYCLOAK_OATHKEEPER_CLIENT_ID:-dtaas-workspace}
+      - LOGIN_RELAY_URL=https://${SERVER_DNS:-localhost}/login-relay
+      # Username path prefixes — substituted into access-rules.yml per-user upstreams.
+      - USERNAME1=${USERNAME1:-user1}
+      - USERNAME2=${USERNAME2:-user2}
+      - USERNAME_ADMIN=${USERNAME_ADMIN:-sandra}
     labels:
       - "traefik.enable=true"
-      # Define the ForwardAuth middleware. Traefik sends workspace requests here
-      # for JWT validation before forwarding to the workspace service.
-      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.address=http://oathkeeper:4456/decisions"
-      # Forward authenticated user identity headers from Oathkeeper to upstream services.
-      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authResponseHeaders=X-User-Name,X-User-Subject,X-User-Groups"
-      # Forward the Authorization header and Cookie so Oathkeeper can validate
-      # both Bearer tokens (programmatic fetch) and the dtaas_access_token cookie
-      # (browser-navigation workspace requests).
-      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authRequestHeaders=Authorization,Cookie"
+      # Expose the proxy port as a named Traefik service. User workspace routers
+      # reference this service so traffic flows: Traefik → Oathkeeper proxy → backend.
+      # No forwardauth middleware — Oathkeeper handles auth inline as a proxy.
+      - "traefik.http.services.oathkeeper-proxy.loadbalancer.server.port=4455"
+    networks:
+      - frontend
+      - users
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
+  login-relay:
+    build:
+      context: ./login-relay
+    restart: unless-stopped
+    environment:
+      # Public Keycloak URL — used to build the browser-facing auth redirect.
+      - KEYCLOAK_PUBLIC_URL=https://${SERVER_DNS:-localhost}/auth
+      # Internal Keycloak URL — used for server-side token exchange.
+      - KEYCLOAK_INTERNAL_URL=http://keycloak:8080/auth
+      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-dtaas}
+      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_OATHKEEPER_CLIENT_ID:-dtaas-workspace}
+      - SERVER_DNS=${SERVER_DNS:-localhost}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.login-relay.entryPoints=web-secure"
+      - "traefik.http.routers.login-relay.rule=Host(`${SERVER_DNS:-localhost}`) && (PathPrefix(`/login-relay`) || Path(`/logout`))"
+      - "traefik.http.routers.login-relay.tls=true"
+      - "traefik.http.routers.login-relay.middlewares=login-relay-ratelimit"
+      - "traefik.http.services.login-relay.loadbalancer.server.port=8080"
+      # Rate limit: max 20 login initiations/minute per IP — prevents abuse of the
+      # PKCE flow. No auth middleware — this path must be publicly reachable.
+      - "traefik.http.middlewares.login-relay-ratelimit.ratelimit.average=20"
+      - "traefik.http.middlewares.login-relay-ratelimit.ratelimit.burst=10"
+      - "traefik.http.middlewares.login-relay-ratelimit.ratelimit.period=1m"
     networks:
       - frontend
       - users

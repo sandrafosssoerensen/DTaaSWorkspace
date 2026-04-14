@@ -9,7 +9,7 @@
   description: >
     Allow unauthenticated GET/HEAD access to health-check endpoints.
   match:
-    url: "<^/health.*$>"
+    url: "<^https?://[^/]*/health.*$>"
     methods:
       - GET
       - HEAD
@@ -20,17 +20,32 @@
   mutators:
     - handler: noop
 
-# Rule 2: Workspace user paths — require valid Keycloak JWT.
-# Oathkeeper validates the JWT signature, issuer, audience, and expiry.
-# Fine-grained RBAC (which user can access which workspace) is enforced
-# separately by OPA via the workspace nginx.
-- id: dtaas-workspace-jwt-enforcement
+# Rule 2: Login-relay and logout — no authentication required.
+# The login-relay initiates the Keycloak PKCE flow for unauthenticated browsers
+# redirected here by Oathkeeper's redirect error handler. /logout is a public
+# alias for /login-relay/logout — must be reachable without a valid token.
+- id: dtaas-login-relay-public
   version: "v0.36.0-beta.1"
   description: >
-    Requires a valid Keycloak-issued JWT. Oathkeeper validates the token
-    and injects user identity headers. RBAC is handled downstream by OPA.
+    Allow unauthenticated GET access to the login-relay and /logout.
   match:
-    url: "<.*>"
+    url: "<^https?://[^/]*/(login-relay.*|logout)$>"
+    methods:
+      - GET
+  authenticators:
+    - handler: noop
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
+
+# Rule 3: user1 workspace — require valid Keycloak JWT, proxy to user1 container.
+- id: dtaas-user1-workspace
+  version: "v0.36.0-beta.1"
+  description: >
+    Requires a valid Keycloak JWT. Proxies to the user1 workspace container.
+  match:
+    url: "<^https?://[^/]*/${USERNAME1}(/.*)?$>"
     methods:
       - GET
       - HEAD
@@ -39,13 +54,75 @@
       - PATCH
       - DELETE
       - OPTIONS
+  upstream:
+    url: http://user1:8080
   authenticators:
-    # Try Authorization header first (programmatic fetch / Bearer token).
     - handler: jwt
       config:
         token_from:
           header: Authorization
-    # Fall back to cookie for browser-navigation workspace requests.
+    - handler: jwt
+      config:
+        token_from:
+          cookie: dtaas_access_token
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: header
+
+# Rule 4: user2 workspace — require valid Keycloak JWT, proxy to user2 container.
+- id: dtaas-user2-workspace
+  version: "v0.36.0-beta.1"
+  description: >
+    Requires a valid Keycloak JWT. Proxies to the user2 workspace container.
+  match:
+    url: "<^https?://[^/]*/${USERNAME2}(/.*)?$>"
+    methods:
+      - GET
+      - HEAD
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+  upstream:
+    url: http://user2:8080
+  authenticators:
+    - handler: jwt
+      config:
+        token_from:
+          header: Authorization
+    - handler: jwt
+      config:
+        token_from:
+          cookie: dtaas_access_token
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: header
+
+# Rule 5: admin workspace — require valid Keycloak JWT, proxy to admin container.
+- id: dtaas-admin-workspace
+  version: "v0.36.0-beta.1"
+  description: >
+    Requires a valid Keycloak JWT. Proxies to the admin workspace container.
+  match:
+    url: "<^https?://[^/]*/${USERNAME_ADMIN}(/.*)?$>"
+    methods:
+      - GET
+      - HEAD
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+  upstream:
+    url: http://admin:8080
+  authenticators:
+    - handler: jwt
+      config:
+        token_from:
+          header: Authorization
     - handler: jwt
       config:
         token_from:
