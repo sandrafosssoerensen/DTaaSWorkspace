@@ -152,6 +152,30 @@ async def logout() -> RedirectResponse:
     return response
 
 
+async def _fetch_access_token(code: str) -> str:
+    """Exchange a Keycloak authorization code for an access token."""
+    async with AsyncOAuth2Client(
+        client_id=KEYCLOAK_CLIENT_ID,
+        client_secret=KEYCLOAK_CLIENT_SECRET,
+        redirect_uri=_callback_uri(),
+    ) as client:
+        try:
+            token = await client.fetch_token(
+                url=f"{_internal_realm_url()}/token",
+                grant_type="authorization_code",
+                code=code,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Keycloak token exchange failed: {exc}",
+            ) from exc
+    access_token = token.get("access_token", "")
+    if not access_token:
+        raise HTTPException(status_code=502, detail="No access_token in Keycloak response.")
+    return access_token
+
+
 @app.get("/login-relay/callback")
 async def callback(
     code: str = "",
@@ -180,28 +204,7 @@ async def callback(
     except Exception:
         return_to = "/"
 
-    # Authlib AsyncOAuth2Client handles the token POST and response parsing.
-    async with AsyncOAuth2Client(
-        client_id=KEYCLOAK_CLIENT_ID,
-        client_secret=KEYCLOAK_CLIENT_SECRET,
-        redirect_uri=_callback_uri(),
-    ) as client:
-        try:
-            token = await client.fetch_token(
-                url=f"{_internal_realm_url()}/token",
-                grant_type="authorization_code",
-                code=code,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Keycloak token exchange failed: {exc}",
-            ) from exc
-
-    access_token = token.get("access_token", "")
-    if not access_token:
-        raise HTTPException(status_code=502, detail="No access_token in Keycloak response.")
-
+    access_token = await _fetch_access_token(code)
     response = RedirectResponse(url=return_to, status_code=302)
     # max_age=300 — matches the Keycloak default access token lifespan (5 min).
     # Cookie expires with the JWT; Oathkeeper redirects to login-relay on expiry,
