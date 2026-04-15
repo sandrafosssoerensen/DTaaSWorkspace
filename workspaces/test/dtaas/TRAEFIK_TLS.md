@@ -81,7 +81,7 @@ Quick steps:
 2. Login with admin credentials from `.env`
 3. Create a realm named `dtaas` (or match your `KEYCLOAK_REALM`)
 4. Create a **confidential** OIDC client named `dtaas-workspace` with redirect
-   URI `https://<SERVER_DNS>/*`
+   URI `https://<SERVER_DNS>/login-relay/callback`
 5. Copy the generated client secret and set `KEYCLOAK_CLIENT_SECRET` in `.env`
 6. Add an **Audience mapper** to `dtaas-workspace-dedicated` scope with
    **Included Client Audience** set to `dtaas-workspace` (required for
@@ -311,7 +311,7 @@ sudo chown -R 1000:100 workspaces/test/dtaas/files
 **Solutions**:
 
 1. Clear browser cookies for `<SERVER_DNS>`
-2. Verify the Keycloak client **Valid redirect URIs** includes `https://<SERVER_DNS>/*`
+2. Verify the Keycloak client **Valid redirect URIs** includes `https://<SERVER_DNS>/login-relay/callback`
 3. Ensure `KEYCLOAK_CLIENT_ID` in `.env` matches the client ID in Keycloak
 4. Confirm client authentication is **ON** in Keycloak (confidential client)
 5. Verify `KEYCLOAK_CLIENT_SECRET` in `.env` matches the Keycloak credentials tab

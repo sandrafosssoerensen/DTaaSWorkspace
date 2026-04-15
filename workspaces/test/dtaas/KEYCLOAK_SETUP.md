@@ -168,7 +168,7 @@ The login-relay exchanges the auth code for a token using the client secret
    - Click **Next**
 5. Login settings:
    - **Root URL**: `https://<SERVER_DNS>`
-   - **Valid redirect URIs**: `https://<SERVER_DNS>/*`
+   - **Valid redirect URIs**: `https://<SERVER_DNS>/login-relay/callback`
    - **Valid post logout redirect URIs**: `https://<SERVER_DNS>/*`
      *(required — login-relay redirects to `/` after logout; without this
      Keycloak will show "Invalid redirect uri")*
