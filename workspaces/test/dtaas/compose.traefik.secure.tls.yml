@@ -151,6 +151,7 @@ services:
           /etc/oathkeeper/config/access-rules.yml > /tmp/access-rules.yml &&
         oathkeeper serve -c /tmp/oathkeeper.yml
     volumes:
+      # Provides oathkeeper.yml and access-rules.yml to the container.
       - "./oathkeeper:/etc/oathkeeper/config"
     environment:
       - KEYCLOAK_JWKS_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs
@@ -183,8 +184,8 @@ services:
       # Internal Keycloak URL — used for server-side token exchange.
       - KEYCLOAK_INTERNAL_URL=http://keycloak:8080/auth
       - KEYCLOAK_REALM=${KEYCLOAK_REALM}
-      # Single PKCE client — dtaas-workspace gates both SPA and workspace paths.
       - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
       - SERVER_DNS=${SERVER_DNS}
       # Workspace prefixes — used to detect unknown paths and avoid redirect loops.
       - USERNAME1=${USERNAME1:-user1}
