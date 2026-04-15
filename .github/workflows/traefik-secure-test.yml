@@ -571,7 +571,7 @@ jobs:
       - name: Pull the docker images used in compose files
         run: |
           docker pull traefik:v3.6.4
-          docker pull thomseddon/traefik-forward-auth:latest
+          docker pull oryd/oathkeeper:v26.2.0
           docker pull intocps/dtaas-web:latest
           docker pull mltooling/ml-workspace-minimal:0.13.2
 
@@ -591,13 +591,6 @@ jobs:
             -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
             --env-file workspaces/test/dtaas/config/.env \
             ps
-          echo "Traefik forward-auth depends on keycloak " \
-            "configuration and hence it keeps restarting, " \
-            "so stop the service"
-          docker compose \
-            -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
-            --env-file workspaces/test/dtaas/config/.env \
-            stop traefik-forward-auth
           echo "---"
           # Check if all services are running
           SERVICES=$(docker compose \
@@ -607,18 +600,18 @@ jobs:
           if echo "$SERVICES" | head -1 | grep -q '^\['; then
             # JSON array format
             FAILED=$(echo "$SERVICES" | jq -r \
-              '.[] | select(.State != "running") | select(.Name | test("traefik-forward-auth") | not) | .Name')
+              '.[] | select(.State != "running") | .Name')
           else
             # Newline-delimited JSON format
             FAILED=$(echo "$SERVICES" | jq -r \
-              'select(.State != "running") | select(.Name | test("traefik-forward-auth") | not) | .Name')
+              'select(.State != "running") | .Name')
           fi
           if [ -n "$FAILED" ]; then
             echo "❌ Some services are not running:"
             echo "$FAILED"
             exit 1
           fi
-          echo "✅ All services except Traefik forward-auth are running"
+          echo "✅ All services are running"
 
       - name: Test HTTPS connectivity
         run: |
@@ -653,7 +646,7 @@ jobs:
             docker compose \
               -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
               --env-file workspaces/test/dtaas/config/.env \
-              logs traefik-forward-auth
+              logs oathkeeper
             exit 1
           fi
 
@@ -687,11 +680,16 @@ jobs:
             -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
             --env-file workspaces/test/dtaas/config/.env \
             logs traefik
-          echo "=== Traefik Forward Auth Logs ==="
+          echo "=== Oathkeeper Logs ==="
           docker compose \
             -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
             --env-file workspaces/test/dtaas/config/.env \
-            logs traefik-forward-auth
+            logs oathkeeper
+          echo "=== Login-Relay Logs ==="
+          docker compose \
+            -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
+            --env-file workspaces/test/dtaas/config/.env \
+            logs login-relay
           echo "=== User1 Logs ==="
           docker compose \
             -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
