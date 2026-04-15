@@ -1,0 +1,87 @@
+# ORY Oathkeeper configuration for DTaaS workspace authentication.
+# Oathkeeper is responsible for JWT validation only — it validates tokens issued
+# by Keycloak and injects user identity headers (X-User-Name, X-User-Subject,
+# X-User-Groups) for upstream services.
+# Fine-grained RBAC authorization is handled separately by OPA via workspace nginx.
+# Traefik routes workspace paths to the Oathkeeper proxy port (4455).
+# Oathkeeper validates the JWT and proxies to the upstream workspace service.
+
+serve:
+  proxy:
+    port: 4455
+    host: "0.0.0.0"
+  api:
+    port: 4456
+    host: "0.0.0.0"
+
+access_rules:
+  matching_strategy: regexp
+  repositories:
+    - file:///tmp/access-rules.yml
+
+log:
+  level: info
+  format: json
+
+errors:
+  # All unauthorized/forbidden errors redirect to the login-relay, which
+  # initiates a Keycloak PKCE flow and returns the user to their original
+  # destination after login.
+  fallback:
+    - redirect
+  handlers:
+    redirect:
+      enabled: true
+      config:
+        to: "${LOGIN_RELAY_URL}"
+        # Append the original request URL as ?return_to=<url> so the login-relay
+        # can redirect the user back to their workspace after Keycloak login.
+        return_to_query_param: return_to
+    json:
+      enabled: true
+      config:
+        verbose: true
+
+authenticators:
+  noop:
+    enabled: true
+
+  jwt:
+    enabled: true
+    config:
+      jwks_urls:
+        - ${KEYCLOAK_JWKS_URL}
+      trusted_issuers:
+        - ${KEYCLOAK_ISSUER_URL}
+      allowed_algorithms:
+        - RS256
+        - RS384
+        - RS512
+      # token_from accepts only one source in Oathkeeper v26. Per-rule
+      # fallback (header → cookie) is configured in access-rules.yml instead.
+      # scope_strategy is set to none because the DTaaS PKCE client does not
+      # request a specific OAuth scope for workspace access — authorization is
+      # handled downstream by OPA via workspace nginx.
+      # Set to 'exact' and configure required_scope if scopes are introduced.
+      scope_strategy: none
+      target_audience:
+        - ${KEYCLOAK_TARGET_AUDIENCE}
+
+authorizers:
+  allow:
+    enabled: true
+
+  deny:
+    enabled: true
+
+mutators:
+  noop:
+    enabled: true
+
+  header:
+    enabled: true
+    config:
+      headers:
+        X-User-Name: "{{ print .Extra.preferred_username }}"
+        X-User-Subject: "{{ .Subject }}"
+        X-User-Groups: "{{ .Extra.groups | toJson }}"

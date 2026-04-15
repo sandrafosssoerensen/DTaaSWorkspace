@@ -1,0 +1,132 @@
+# DTaaS Oathkeeper access rules.
+# Oathkeeper is responsible for JWT validation only (authentication).
+# Authorization (RBAC) is handled by OPA, linked to the workspace nginx —
+# Oathkeeper and OPA are decoupled.
+#
+# IMPORTANT — Oathkeeper v26 with regexp matching_strategy requires EXACTLY ONE
+# rule to match per request. Overlapping rules cause a 500 "multiple rules" error.
+# Every URL pattern must be non-overlapping.
+#
+# Unknown paths (e.g. /user1 when USERNAME1=sandra) match no rule → Oathkeeper
+# returns a "no rule matched" error → fallback redirect fires → login-relay.
+# The login-relay normalises unknown return_to paths to "/" to prevent redirect
+# loops: after Keycloak login the user lands at the SPA root instead of looping.
+
+# Rule 1: SPA gateway — known SPA paths require a valid JWT (cookie).
+- id: dtaas-spa-gateway
+  version: "v0.36.0-beta.1"
+  description: >
+    Requires a valid dtaas-workspace JWT (cookie: dtaas_access_token).
+    Proxies to the DTaaS web client. Covers the SPA root and known sub-paths.
+  match:
+    url: "<^https?://[^/]*(/($|library(/.*)?$|digitaltwins(/.*)?$|preview(/.*)?$|create(/.*)?$|env\\.js$|static(/.*)?$|favicon\\.ico$|manifest\\.json$|logo.*$))?$>"
+    methods:
+      - GET
+      - HEAD
+      - OPTIONS
+  upstream:
+    url: http://client:4000
+  authenticators:
+    - handler: jwt
+      config:
+        token_from:
+          cookie: dtaas_access_token
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
+
+# Rule 2: user1 workspace.
+- id: dtaas-user1-workspace
+  version: "v0.36.0-beta.1"
+  description: >
+    Requires a valid Keycloak JWT. Proxies to the user1 workspace container.
+  match:
+    url: "<^https?://[^/]*/${USERNAME1}(/.*)?$>"
+    methods:
+      - GET
+      - HEAD
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+  upstream:
+    url: http://user1:8080
+  authenticators:
+    - handler: jwt
+      config:
+        token_from:
+          header: Authorization
+    - handler: jwt
+      config:
+        token_from:
+          cookie: dtaas_access_token
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: header
+
+# Rule 3: user2 workspace.
+- id: dtaas-user2-workspace
+  version: "v0.36.0-beta.1"
+  description: >
+    Requires a valid Keycloak JWT. Proxies to the user2 workspace container.
+  match:
+    url: "<^https?://[^/]*/${USERNAME2}(/.*)?$>"
+    methods:
+      - GET
+      - HEAD
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+  upstream:
+    url: http://user2:8080
+  authenticators:
+    - handler: jwt
+      config:
+        token_from:
+          header: Authorization
+    - handler: jwt
+      config:
+        token_from:
+          cookie: dtaas_access_token
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: header
+
+# Rule 4: login-relay and logout — public, no authentication required.
+- id: dtaas-login-relay-public
+  version: "v0.36.0-beta.1"
+  description: >
+    Allow unauthenticated GET access to the login-relay and /logout.
+  match:
+    url: "<^https?://[^/]*/(login-relay.*|logout)$>"
+    methods:
+      - GET
+  authenticators:
+    - handler: noop
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
+
+# Rule 5: health check — public, no authentication required.
+- id: dtaas-public-health
+  version: "v0.36.0-beta.1"
+  description: >
+    Allow unauthenticated GET/HEAD access to health-check endpoints.
+  match:
+    url: "<^https?://[^/]*/health.*$>"
+    methods:
+      - GET
+      - HEAD
+  authenticators:
+    - handler: noop
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
