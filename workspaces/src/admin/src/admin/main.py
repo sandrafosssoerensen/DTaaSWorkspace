@@ -179,12 +179,11 @@ def cli():
     print(f"  - http://{args.host}:{args.port}{prefix_display}/health")
     print(f"  - http://{args.host}:{args.port}{prefix_display}/")
 
-    # Recreate app with path prefix
-    global app  # pylint: disable=global-statement
-    app = create_app(path_prefix)
+    # Recreate app with path prefix for CLI launch.
+    app_instance = create_app(path_prefix)
 
     uvicorn.run(
-        app,
+        app_instance,
         host=args.host,
         port=args.port,
         reload=args.reload

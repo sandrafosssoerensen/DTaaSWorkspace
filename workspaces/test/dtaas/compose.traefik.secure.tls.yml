@@ -120,7 +120,7 @@ services:
 
   traefik-forward-auth:
     image: thomseddon/traefik-forward-auth:latest
-    #image: traefik-forward-auth-local:latest
+    # image: traefik-forward-auth-local:latest
     restart: unless-stopped
     volumes:
       - "./config/conf:/conf"
