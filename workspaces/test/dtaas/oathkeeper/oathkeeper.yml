@@ -74,6 +74,9 @@ authorizers:
   deny:
     enabled: true
 
+  remote_json:
+    enabled: true
+
 mutators:
   noop:
     enabled: true

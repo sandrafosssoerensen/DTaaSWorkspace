@@ -40,7 +40,8 @@
 - id: dtaas-user1-workspace
   version: "v0.36.0-beta.1"
   description: >
-    Requires a valid Keycloak JWT. Proxies to the user1 workspace container.
+    Requires a valid Keycloak JWT whose preferred_username matches ${USERNAME1}.
+    Proxies to the user1 workspace container.
   match:
     url: "<^https?://[^/]*/${USERNAME1}(/.*)?$>"
     methods:
@@ -63,7 +64,11 @@
         token_from:
           cookie: dtaas_access_token
   authorizer:
-    handler: allow
+    handler: remote_json
+    config:
+      remote: http://login-relay:8080/authorize/${USERNAME1}
+      payload: |
+        {"subject":"{{ .Subject }}","preferred_username":"{{ print .Extra.preferred_username }}"}
   mutators:
     - handler: header
 
@@ -71,7 +76,8 @@
 - id: dtaas-user2-workspace
   version: "v0.36.0-beta.1"
   description: >
-    Requires a valid Keycloak JWT. Proxies to the user2 workspace container.
+    Requires a valid Keycloak JWT whose preferred_username matches ${USERNAME2}.
+    Proxies to the user2 workspace container.
   match:
     url: "<^https?://[^/]*/${USERNAME2}(/.*)?$>"
     methods:
@@ -94,7 +100,11 @@
         token_from:
           cookie: dtaas_access_token
   authorizer:
-    handler: allow
+    handler: remote_json
+    config:
+      remote: http://login-relay:8080/authorize/${USERNAME2}
+      payload: |
+        {"subject":"{{ .Subject }}","preferred_username":"{{ print .Extra.preferred_username }}"}
   mutators:
     - handler: header
 

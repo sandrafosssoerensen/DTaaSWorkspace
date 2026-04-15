@@ -28,6 +28,7 @@ from authlib.common.security import generate_token
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastapi import Cookie, FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -110,6 +111,24 @@ def _safe_return_to(return_to: str) -> str:
     if parsed.query:
         path += "?" + parsed.query
     return path
+
+
+class _AuthorizeBody(BaseModel):
+    subject: str = ""
+    preferred_username: str = ""
+
+
+@app.post("/authorize/{expected_username}", status_code=200)
+async def authorize(expected_username: str, body: _AuthorizeBody) -> dict:
+    """Oathkeeper remote_json authorizer: enforce per-user workspace path ownership.
+
+    Called server-side by Oathkeeper after JWT validation. The preferred_username
+    in the payload is sourced from the verified JWT claims, so it is trusted.
+    Returns 200 to allow, 403 to deny.
+    """
+    if not body.preferred_username or body.preferred_username != expected_username:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return {}
 
 
 @app.get("/login-relay")
