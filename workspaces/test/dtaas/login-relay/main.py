@@ -16,7 +16,7 @@ Architecture:
   Traefik → Oathkeeper proxy:4455 → workspace containers
                      ↓ no JWT + browser
              /login-relay?return_to=/user1 → Keycloak → /login-relay/callback
-                     → sets dtaas_access_token cookie → /user1
+                     →y sets dtaas_access_token cookie → /user1
 """
 
 import base64
@@ -25,7 +25,6 @@ import json
 import os
 import time
 import urllib.parse
-
 from authlib.common.security import generate_token
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastapi import Cookie, FastAPI, HTTPException
@@ -33,6 +32,13 @@ from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 
 app = FastAPI()
+
+# Server-side JTI store: maps username → last issued JTI.
+# Populated in /login-relay/callback; read in /authz/workspace.
+# Oathkeeper's remote_json authorizer calls /authz/workspace server-to-server,
+# so browser cookies are never forwarded there — this store is the only way to
+# carry the JTI across the introspection→authorizer boundary.
+_session_jti_store: dict[str, str] = {}
 
 # Public Keycloak URL — used for browser redirects (login page).
 KEYCLOAK_PUBLIC_URL = os.environ.get("KEYCLOAK_PUBLIC_URL", "https://localhost/auth")
@@ -66,9 +72,11 @@ _SPA_PREFIXES = (
 def _decode_jwt_claims(token: str) -> dict:
     """Extract JWT payload claims without signature verification.
 
-    Used only for redirect-loop detection. The authoritative claim check
+    Used for redirect-loop detection. The authoritative claim check
     (preferred_username == path_prefix) is done by /authz/workspace, which is
     called by Oathkeeper's remote_json authorizer with full JWT validation.
+    
+    Returns dict with claims or empty dict on error.
     """
     try:
         parts = token.split(".")
@@ -140,17 +148,65 @@ class _AuthzBody(BaseModel):
 
 
 @app.post("/authz/workspace/{path_prefix}", status_code=200)
-async def authorize_workspace(path_prefix: str, body: _AuthzBody) -> Response:
-    """Verify the JWT preferred_username matches the workspace path prefix.
+async def authorize_workspace(
+    path_prefix: str,
+    body: _AuthzBody,
+) -> Response:
+    """Verify the JWT preferred_username matches the workspace path prefix AND
+    detect token rotation by comparing JTI (JWT ID) claims.
 
     Called by Oathkeeper's remote_json authorizer for per-user RBAC.
-    Returns 200 if the token owner equals path_prefix, 403 otherwise.
+    This is a server-to-server call — browser cookies are NOT forwarded here,
+    so JTI comparison is done against _session_jti_store (populated in callback).
+
+    Logic:
+      1. Extract username from token — must match path_prefix.
+      2. Extract JTI from token — must match the JTI stored during last login.
+      3. If JTI changed = Keycloak issued a new token = re-auth required.
+
+    Returns 200 if both checks pass.
+    Returns 401 if JTI doesn't match (token was rotated — force re-authentication).
+    Returns 403 if username mismatch (wrong user accessing workspace).
     """
     extra = body.subject.get("extra") or {}
-    username = extra.get("preferred_username", "")
-    if username and username == path_prefix:
+    # Keycloak introspection returns "username"; JWT claims use "preferred_username".
+    # Try both so this works regardless of Keycloak version/configuration.
+    username = extra.get("username") or extra.get("preferred_username", "")
+    logging.debug(
+        "authz/workspace/%s — username=%r jti_current=%r jti_stored=%r extra_keys=%s",
+        path_prefix, username,
+        extra.get("jti", ""), _session_jti_store.get(username, ""),
+        sorted(extra.keys()),
+    )
+
+    # Check 1: Username must match path prefix.
+    if not username or username != path_prefix:
+        raise HTTPException(status_code=403, detail="Forbidden - wrong user")
+
+    # Check 2: Token JTI must match the JTI issued during the last login callback.
+    # The extra dict carries Keycloak introspection claims, including jti.
+    current_jti = extra.get("jti", "")
+    stored_jti = _session_jti_store.get(username, "")
+
+    # No stored JTI means login-relay restarted or this user hasn't logged in yet.
+    # Accept the request; the next callback will populate the store.
+    if not stored_jti:
         return Response(status_code=200)
-    raise HTTPException(status_code=403, detail="Forbidden")
+
+    # Both values must be present and equal.
+    if current_jti and current_jti != stored_jti:
+        # Clear the store so the next callback() (after prompt=login forces
+        # credential entry) can establish a new session with the new JTI.
+        _session_jti_store.pop(username, None)
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "Token was rotated - new authentication required. "
+                "Keycloak issued a new token; previous session is invalid."
+            ),
+        )
+
+    return Response(status_code=200)
 
 
 @app.get("/login-relay")
@@ -187,6 +243,10 @@ async def login(
         "response_type": "code",
         "scope": "openid profile",
         "state": nonce,
+        # Force Keycloak to show the login form even when a SSO session is active.
+        # Without this, Keycloak silently re-issues a token every 5 min (when the
+        # dtaas_access_token cookie expires), so the user is never prompted again.
+        "prompt": "login",
     })
 
     response = RedirectResponse(
@@ -265,9 +325,27 @@ async def callback(
 
     access_token = await _fetch_access_token(code)
     response = RedirectResponse(url=return_to, status_code=302)
+
+    # Extract claims from the new token.
+    token_claims = _decode_jwt_claims(access_token)
+    token_jti = token_claims.get("jti", "")
+    # JWT uses "preferred_username"; introspection uses "username". Try both.
+    token_username = token_claims.get("preferred_username") or token_claims.get("username", "")
+
+    # Persist the JTI server-side so authorize_workspace can detect rotation.
+    # Oathkeeper's remote_json authorizer calls /authz/workspace server-to-server
+    # (no browser cookies forwarded), so a shared in-process store is required.
+    #
+    # IMPORTANT: only write when no session exists for this user.
+    # If we always overwrote, the stored JTI would always match the new token and
+    # rotation would never be detected. The store is cleared by authorize_workspace
+    # on JTI mismatch (401), so the next genuine login (with prompt=login forcing
+    # credential entry) re-establishes the session here.
+    if token_jti and token_username and token_username not in _session_jti_store:
+        _session_jti_store[token_username] = token_jti
+
     # max_age=300 — matches the Keycloak default access token lifespan (5 min).
-    # Cookie expires with the JWT; Oathkeeper redirects to login-relay on expiry,
-    # which silently re-authenticates via the Keycloak SSO session (idle: 30 min).
+    # The cookie expires with the JWT; Oathkeeper will redirect to login after expiry.
     response.set_cookie(
         key="dtaas_access_token",
         value=access_token,
@@ -277,6 +355,7 @@ async def callback(
         samesite="lax",
         path="/",
     )
+
     response.delete_cookie("oauth_state")
     return response
 

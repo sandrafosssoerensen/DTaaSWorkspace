@@ -1,5 +1,5 @@
 # DTaaS Oathkeeper access rules.
-# Oathkeeper is responsible for JWT validation only (authentication).
+# Oathkeeper validates tokens via Keycloak token introspection (authentication).
 # Authorization (RBAC) is handled by OPA, linked to the workspace nginx —
 # Oathkeeper and OPA are decoupled.
 #
@@ -12,11 +12,12 @@
 # The login-relay normalises unknown return_to paths to "/" to prevent redirect
 # loops: after Keycloak login the user lands at the SPA root instead of looping.
 
-# Rule 1: SPA gateway — known SPA paths require a valid JWT (cookie).
+# Rule 1: SPA gateway — known SPA paths require an active token (cookie).
 - id: dtaas-spa-gateway
   version: "v0.36.0-beta.1"
   description: >
-    Requires a valid dtaas-workspace JWT (cookie: dtaas_access_token).
+    Requires an active dtaas-workspace token (cookie: dtaas_access_token),
+    validated via Keycloak introspection.
     Proxies to the DTaaS web client. Covers the SPA root and known sub-paths.
   match:
     url: "<^https?://[^/]*(/($|library(/.*)?$|digitaltwins(/.*)?$|preview(/.*)?$|create(/.*)?$|env\\.js$|static(/.*)?$|favicon\\.ico$|manifest\\.json$|logo.*$))?$>"
@@ -27,7 +28,7 @@
   upstream:
     url: http://client:4000
   authenticators:
-    - handler: jwt
+    - handler: oauth2_introspection
       config:
         token_from:
           cookie: dtaas_access_token
@@ -40,9 +41,10 @@
 - id: dtaas-user1-workspace
   version: "v0.36.0-beta.1"
   description: >
-    Requires a valid Keycloak JWT whose preferred_username matches the path
-    prefix (${USERNAME1}). The remote_json authorizer delegates the claim check
-    to login-relay, which returns 200 only when the token belongs to that user.
+    Requires an active Keycloak token whose preferred_username matches the path
+    prefix (${USERNAME1}), validated via introspection. The remote_json authorizer
+    delegates the username check to login-relay, which returns 200 only when the
+    token belongs to that user.
   match:
     url: "<^https?://[^/]*/${USERNAME1}(/.*)?$>"
     methods:
@@ -56,11 +58,11 @@
   upstream:
     url: http://user1:8080
   authenticators:
-    - handler: jwt
+    - handler: oauth2_introspection
       config:
         token_from:
           header: Authorization
-    - handler: jwt
+    - handler: oauth2_introspection
       config:
         token_from:
           cookie: dtaas_access_token
@@ -76,9 +78,10 @@
 - id: dtaas-user2-workspace
   version: "v0.36.0-beta.1"
   description: >
-    Requires a valid Keycloak JWT whose preferred_username matches the path
-    prefix (${USERNAME2}). The remote_json authorizer delegates the claim check
-    to login-relay, which returns 200 only when the token belongs to that user.
+    Requires an active Keycloak token whose preferred_username matches the path
+    prefix (${USERNAME2}), validated via introspection. The remote_json authorizer
+    delegates the username check to login-relay, which returns 200 only when the
+    token belongs to that user.
   match:
     url: "<^https?://[^/]*/${USERNAME2}(/.*)?$>"
     methods:
@@ -92,11 +95,11 @@
   upstream:
     url: http://user2:8080
   authenticators:
-    - handler: jwt
+    - handler: oauth2_introspection
       config:
         token_from:
           header: Authorization
-    - handler: jwt
+    - handler: oauth2_introspection
       config:
         token_from:
           cookie: dtaas_access_token
