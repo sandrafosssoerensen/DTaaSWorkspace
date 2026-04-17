@@ -22,6 +22,7 @@ Architecture:
 import base64
 import hmac
 import json
+import logging
 import os
 import time
 import urllib.parse
@@ -243,9 +244,9 @@ async def login(
         "response_type": "code",
         "scope": "openid profile",
         "state": nonce,
-        # Force Keycloak to show the login form even when a SSO session is active.
-        # Without this, Keycloak silently re-issues a token every 5 min (when the
-        # dtaas_access_token cookie expires), so the user is never prompted again.
+        # Force Keycloak to show the login form even when a SSO session exists.
+        # Both this gateway login and the SPA's own OIDC login require explicit
+        # credential entry — SSO silent re-auth is intentionally disabled.
         "prompt": "login",
     })
 
@@ -336,12 +337,12 @@ async def callback(
     # Oathkeeper's remote_json authorizer calls /authz/workspace server-to-server
     # (no browser cookies forwarded), so a shared in-process store is required.
     #
-    # IMPORTANT: only write when no session exists for this user.
-    # If we always overwrote, the stored JTI would always match the new token and
-    # rotation would never be detected. The store is cleared by authorize_workspace
-    # on JTI mismatch (401), so the next genuine login (with prompt=login forcing
-    # credential entry) re-establishes the session here.
-    if token_jti and token_username and token_username not in _session_jti_store:
+    # Always update the JTI store on every callback. Because prompt=login forces
+    # explicit credential entry before this callback is ever reached, each arrival
+    # here represents a genuine authentication event. Overwriting the store lets
+    # the JTI check in authorize_workspace accept the freshly issued token while
+    # still rejecting any lingering old token (its JTI no longer matches the store).
+    if token_jti and token_username:
         _session_jti_store[token_username] = token_jti
 
     # max_age=300 — matches the Keycloak default access token lifespan (5 min).

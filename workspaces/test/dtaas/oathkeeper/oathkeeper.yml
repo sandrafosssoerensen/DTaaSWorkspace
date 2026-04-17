@@ -67,13 +67,6 @@ authenticators:
     enabled: true
     config:
       introspection_url: "${KEYCLOAK_INTROSPECTION_URL}"
-      # scope_strategy: hierarchic — enforces that the token carries the
-      # dtaas-workspace-access scope while allowing additional OIDC scopes
-      # (openid, email, profile) that Keycloak includes by default.
-      # Using "exact" would reject any token with more scopes than required.
-      scope_strategy: hierarchic
-      required_scope:
-        - dtaas-workspace-access
       # Keycloak's introspection endpoint requires HTTP Basic authentication
       # (client_id:client_secret). The base64-encoded credential is computed
       # in the compose entrypoint script and injected here at startup.
