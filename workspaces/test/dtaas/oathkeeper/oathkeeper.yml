@@ -1,5 +1,5 @@
 # ORY Oathkeeper configuration for DTaaS workspace authentication.
-# 
+#
 # Authentication:
 #   oauth2_introspection: Validates the dtaas_access_token cookie against
 #   Keycloak's introspection endpoint. Returns 401 if token is expired/revoked.

@@ -76,7 +76,7 @@ def _decode_jwt_claims(token: str) -> dict:
     Used for redirect-loop detection. The authoritative claim check
     (preferred_username == path_prefix) is done by /authz/workspace, which is
     called by Oathkeeper's remote_json authorizer with full JWT validation.
-    
+
     Returns dict with claims or empty dict on error.
     """
     try:
