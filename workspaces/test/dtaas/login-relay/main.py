@@ -76,7 +76,7 @@ def _decode_jwt_claims(token: str) -> dict:
     Used for redirect-loop detection. The authoritative claim check
     (preferred_username == path_prefix) is done by /authz/workspace, which is
     called by Oathkeeper's remote_json authorizer with full JWT validation.
-    
+
     Returns dict with claims or empty dict on error.
     """
     try:
@@ -86,7 +86,7 @@ def _decode_jwt_claims(token: str) -> dict:
         payload = parts[1]
         payload += "=" * (-len(payload) % 4)
         return json.loads(base64.urlsafe_b64decode(payload))
-    except Exception:
+    except (ValueError, KeyError, UnicodeDecodeError):
         return {}
 
 
@@ -113,6 +113,22 @@ def _internal_realm_url() -> str:
 
 def _callback_uri() -> str:
     return f"https://{SERVER_DNS}/login-relay/callback"
+
+
+def _check_cross_user_redirect(token: str, destination: str) -> None:
+    """Raise 403 if a valid token owner tries to access another user's workspace."""
+    if not token:
+        return
+    claims = _decode_jwt_claims(token)
+    if claims.get("exp", 0) <= time.time():
+        return
+    username = claims.get("preferred_username", "")
+    if not username:
+        return
+    for prefix in _WORKSPACE_PREFIXES:
+        if destination == prefix or destination.startswith(prefix + "/"):
+            if prefix != f"/{username}":
+                raise HTTPException(status_code=403, detail="Forbidden")
 
 
 def _safe_return_to(return_to: str) -> str:
@@ -223,15 +239,7 @@ async def login(
     # When a user with a valid token tries to access another user's workspace,
     # Oathkeeper's remote_json authorizer returns 403, which redirects here.
     # Without this check the browser loops until the Traefik rate-limiter fires.
-    if dtaas_access_token:
-        claims = _decode_jwt_claims(dtaas_access_token)
-        if claims.get("exp", 0) > time.time():
-            username = claims.get("preferred_username", "")
-            if username:
-                for prefix in _WORKSPACE_PREFIXES:
-                    if safe_destination == prefix or safe_destination.startswith(prefix + "/"):
-                        if prefix != f"/{username}":
-                            raise HTTPException(status_code=403, detail="Forbidden")
+    _check_cross_user_redirect(dtaas_access_token, safe_destination)
 
     # Random state nonce — RFC 6749 §10.12 CSRF protection.
     nonce = generate_token(32)

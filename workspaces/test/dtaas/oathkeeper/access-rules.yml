@@ -20,7 +20,9 @@
     validated via Keycloak introspection.
     Proxies to the DTaaS web client. Covers the SPA root and known sub-paths.
   match:
-    url: "<^https?://[^/]*(/($|library(/.*)?$|digitaltwins(/.*)?$|preview(/.*)?$|create(/.*)?$|env\\.js$|static(/.*)?$|favicon\\.ico$|manifest\\.json$|logo.*$))?$>"
+    url: "<^https?://[^/]*(/($|library(/.*)?$|digitaltwins(/.*)?$|\
+      preview(/.*)?$|create(/.*)?$|env\\.js$|static(/.*)?$|\
+      favicon\\.ico$|manifest\\.json$|logo.*$))?$>"
     methods:
       - GET
       - HEAD
