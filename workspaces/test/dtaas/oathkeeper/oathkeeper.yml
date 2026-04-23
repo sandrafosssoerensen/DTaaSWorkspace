@@ -9,7 +9,7 @@
 #   Checks that preferred_username from introspection matches the URL path prefix.
 #
 # Session lifecycle:
-#   - Browser authenticates via PKCE; login-relay sets dtaas_access_token cookie
+#   - Browser authenticates via authorization-code flow; login-relay sets dtaas_access_token cookie
 #   - Cookie max_age=300 matches Keycloak access token lifespan (5 min)
 #   - On expiry, Oathkeeper redirects to login-relay to re-authenticate
 #
@@ -37,7 +37,7 @@ log:
 
 errors:
   # All errors redirect to the login-relay. For unauthorized/not_found this
-  # initiates a Keycloak PKCE flow. For forbidden (wrong-user workspace access),
+  # initiates a Keycloak authorization-code flow. For forbidden (wrong-user workspace access),
   # the login-relay detects the mismatch via the dtaas_access_token cookie and
   # returns 403 directly, breaking what would otherwise be a redirect loop.
   fallback:

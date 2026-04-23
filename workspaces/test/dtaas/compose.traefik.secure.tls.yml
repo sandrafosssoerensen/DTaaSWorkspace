@@ -135,7 +135,7 @@ services:
     # Proxy port 4455: Traefik routes workspace paths here. Oathkeeper validates
     # tokens via Keycloak introspection and proxies valid requests to the upstream
     # workspace container.
-    # On auth failure it redirects browsers to the login-relay (Keycloak PKCE).
+    # On auth failure it redirects browsers to the login-relay for Keycloak sign-in.
     # Decision API port 4456: kept available for internal use / debugging.
     entrypoint:
       - /bin/sh
@@ -204,7 +204,7 @@ services:
       - "traefik.http.routers.login-relay.middlewares=login-relay-ratelimit"
       - "traefik.http.services.login-relay.loadbalancer.server.port=8080"
       # Rate limit: max 20 login initiations/minute per IP — prevents abuse of the
-      # PKCE flow. No auth middleware — this path must be publicly reachable.
+      # authorization-code login flow. No auth middleware — this path must be publicly reachable.
       - "traefik.http.middlewares.login-relay-ratelimit.ratelimit.average=20"
       - "traefik.http.middlewares.login-relay-ratelimit.ratelimit.burst=10"
       - "traefik.http.middlewares.login-relay-ratelimit.ratelimit.period=1m"

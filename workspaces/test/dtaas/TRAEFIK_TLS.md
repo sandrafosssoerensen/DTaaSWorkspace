@@ -257,11 +257,11 @@ the `oathkeeper` and `login-relay` services.
   upstream:
     url: http://user3:8080
   authenticators:
-    - handler: jwt
+    - handler: oauth2_introspection
       config:
         token_from:
           header: Authorization
-    - handler: jwt
+    - handler: oauth2_introspection
       config:
         token_from:
           cookie: dtaas_access_token

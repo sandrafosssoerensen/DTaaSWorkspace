@@ -20,6 +20,7 @@ Architecture:
 """
 
 import base64
+import binascii
 import hmac
 import json
 import logging
@@ -30,7 +31,7 @@ from authlib.common.security import generate_token
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastapi import Cookie, FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 app = FastAPI()
 
@@ -79,7 +80,7 @@ def _decode_jwt_claims(token: str) -> dict:
         payload = parts[1]
         payload += "=" * (-len(payload) % 4)
         return json.loads(base64.urlsafe_b64decode(payload))
-    except (ValueError, KeyError, UnicodeDecodeError):
+    except (ValueError, KeyError, UnicodeDecodeError, binascii.Error):
         return {}
 
 
@@ -154,7 +155,7 @@ def _safe_return_to(return_to: str) -> str:
 class _AuthzBody(BaseModel):
     """Payload sent by Oathkeeper's remote_json authorizer."""
 
-    subject: dict = {}
+    subject: dict = Field(default_factory=dict)
 
 
 @app.post("/authz/workspace/{path_prefix}", status_code=200)
@@ -286,9 +287,10 @@ async def callback(
         raise HTTPException(status_code=400, detail="State mismatch — possible CSRF attempt.")
 
     try:
-        return_to = base64.urlsafe_b64decode(return_to_b64 + "==").decode()
+        padding = "=" * (-len(return_to_b64) % 4)
+        return_to = base64.urlsafe_b64decode(return_to_b64 + padding).decode()
         return_to = _safe_return_to(return_to)
-    except ValueError:
+    except (ValueError, binascii.Error):
         return_to = "/"
 
     access_token = await _fetch_access_token(code)
