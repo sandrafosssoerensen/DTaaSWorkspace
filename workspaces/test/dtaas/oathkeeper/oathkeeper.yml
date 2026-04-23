@@ -6,16 +6,12 @@
 #
 # Authorization:
 #   remote_json: Calls login-relay /authz/workspace/<user> server-to-server.
-#   Checks two things:
-#     1. preferred_username from introspection must match the URL path prefix.
-#     2. JTI (JWT ID) from introspection must match the JTI stored in login-relay's
-#        server-side session store (_session_jti_store). If Keycloak issued a new
-#        token (JTI changed) the authorizer returns 401 → forced re-login.
+#   Checks that preferred_username from introspection matches the URL path prefix.
 #
 # Session lifecycle:
-#   - Browser authenticates via PKCE; login-relay stores (username → JTI) in memory
-#   - On every workspace request, remote_json compares current JTI vs stored JTI
-#   - If JTI changes → new token was issued outside this session → 401 → re-login
+#   - Browser authenticates via PKCE; login-relay sets dtaas_access_token cookie
+#   - Cookie max_age=300 matches Keycloak access token lifespan (5 min)
+#   - On expiry, Oathkeeper redirects to login-relay to re-authenticate
 #
 # User identity headers (X-User-Name, X-User-Subject, X-User-Groups) are injected
 # by the header mutator for upstream services.
