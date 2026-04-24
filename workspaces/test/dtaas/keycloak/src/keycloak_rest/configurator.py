@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import time
 from typing import Any
 from urllib.parse import urlencode
 
-from .constants import MAPPERS, PAGE_SIZE
+from .constants import PAGE_SIZE, dtaas_client_config, workspace_client_config
 from .http_client import HttpClient
 from .settings import Settings, normalize_path
 from .user_profiles import AdminContext, ensure_user_profile_mappers, update_user_profiles
+
+
+def _token_expiry(token: str) -> float:
+    """Return the exp claim from a JWT, or infinity if it cannot be decoded."""
+    try:
+        segment = token.split(".")[1]
+        segment += "=" * ((4 - len(segment) % 4) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(segment))
+        return float(claims.get("exp", float("inf")))
+    except (IndexError, ValueError, TypeError, AttributeError):
+        return float("inf")
 
 
 class KeycloakRestConfigurator:
@@ -26,12 +40,71 @@ class KeycloakRestConfigurator:
     def run(self) -> None:
         """Run the full claims-configuration workflow."""
         token = self.get_access_token()
+        self.ensure_realm(token)
+        token = self._fresh_token(token)
+        self.ensure_clients(token)
+        token = self._fresh_token(token)
         client_uuid = self.get_client_uuid(token)
         self._configure_mappers(token, client_uuid)
+        token = self._fresh_token(token)
         ctx = AdminContext(self.admin_url, self.settings.realm.name, token, self.http)
         ensure_user_profile_mappers(ctx)
+        token = self._fresh_token(token)
+        ctx = AdminContext(self.admin_url, self.settings.realm.name, token, self.http)
         update_user_profiles(
             ctx, self.settings.profile_base_url, self.settings.realm.user_profiles
+        )
+
+    def _fresh_token(self, current: str) -> str:
+        """Return current token, or a new one if expiry is within 30 seconds."""
+        if time.time() + 30 >= _token_expiry(current):
+            return self.get_access_token()
+        return current
+
+    def ensure_realm(self, token: str) -> None:
+        """Create the configured realm if it does not already exist."""
+        realms = self.http.request_json(self.admin_url, token=token)
+        realm_name = self.settings.realm.name
+        if isinstance(realms, list) and any(
+            r.get("realm") == realm_name for r in realms
+        ):
+            return
+        self.http.request_empty(
+            self.admin_url,
+            method="POST",
+            json_data={"realm": realm_name, "enabled": True},
+            token=token,
+        )
+
+    def ensure_clients(self, token: str) -> None:
+        """Create dtaas-workspace and dtaas-client in the realm if absent.
+
+        Skipped when KEYCLOAK_CLIENT_ROOT_URL is not set, leaving deployments
+        that manage clients separately unaffected.
+        """
+        root_url = self.settings.realm.client_root_url
+        if not root_url:
+            return
+        for config in [workspace_client_config(root_url), dtaas_client_config(root_url)]:
+            self._create_client_if_missing(token, config)
+
+    def _create_client_if_missing(
+        self, token: str, client_config: dict[str, Any]
+    ) -> None:
+        """POST the client only when no existing client matches its clientId."""
+        client_id = client_config["clientId"]
+        query = urlencode({"clientId": client_id})
+        existing = self.http.request_json(
+            f"{self.admin_url}/{self.settings.realm.name}/clients?{query}",
+            token=token,
+        )
+        if existing:
+            return
+        self.http.request_empty(
+            f"{self.admin_url}/{self.settings.realm.name}/clients",
+            method="POST",
+            json_data=client_config,
+            token=token,
         )
 
     def get_access_token(self) -> str:
@@ -115,13 +188,13 @@ class KeycloakRestConfigurator:
         if self.settings.realm.use_shared_scope:
             self._configure_shared_scope_mappers(token, client_uuid)
             return
-        for mapper in MAPPERS:
+        for mapper in self.settings.mappers:
             self.ensure_mapper_on_client(token, client_uuid, mapper)
 
     def _configure_shared_scope_mappers(self, token: str, client_uuid: str) -> None:
         """Ensure shared scope exists, contains mappers, and is assigned."""
         scope_id = self.get_or_create_scope_id(token)
-        for mapper in MAPPERS:
+        for mapper in self.settings.mappers:
             self.ensure_mapper(token, scope_id, mapper)
         self.ensure_scope_assigned(token, client_uuid, scope_id)
 

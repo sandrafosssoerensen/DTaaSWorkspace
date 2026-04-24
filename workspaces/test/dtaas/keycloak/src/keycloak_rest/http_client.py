@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -46,8 +47,8 @@ class HttpClient:
     def _read_json_response(self, request: Request, url: str) -> Any:
         """Perform request and decode JSON, raising useful error details."""
         try:
-            # noqa: S310 - explicit admin URL target
-            with urlopen(request, timeout=30) as response:
+            ctx = ssl.create_default_context()
+            with urlopen(request, timeout=30, context=ctx) as response:  # noqa: S310
                 return self._decode_json_body(response.read())
         except HTTPError as exc:
             error_body = self._read_error_body(exc)

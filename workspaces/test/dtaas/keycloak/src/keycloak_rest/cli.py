@@ -7,7 +7,7 @@ import sys
 
 from .configurator import KeycloakRestConfigurator
 from .dotenv import load_dotenv_file, resolve_default_env_file
-from .settings import settings_from_env
+from .settings import settings_from_env, validate_admin_auth
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,7 +28,9 @@ def configure_from_args(args: argparse.Namespace) -> None:
     env_file = args.env_file or resolve_default_env_file()
     if env_file:
         load_dotenv_file(env_file)
-    configurator = KeycloakRestConfigurator(settings_from_env())
+    settings = settings_from_env()
+    validate_admin_auth(settings.admin)
+    configurator = KeycloakRestConfigurator(settings)
     configurator.run()
 
 

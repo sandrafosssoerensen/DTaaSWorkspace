@@ -139,11 +139,12 @@ class KeycloakIntegrationTests(unittest.TestCase):
 
     def test_script_configures_claims_via_service_account(self) -> None:
         """Validate end-to-end claims setup via service-account auth path."""
-        env_file = self._write_env_file()
-        try:
-            self._run_configuration_script(env_file)
-        finally:
-            os.unlink(env_file)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".env", encoding="utf-8"
+        ) as fh:
+            fh.write(self._env_content())
+            fh.flush()
+            self._run_configuration_script(fh.name)
 
         token = admin_token(self.base_url, self.admin_user, self.admin_password)
         wait_for_client_availability(
@@ -156,26 +157,18 @@ class KeycloakIntegrationTests(unittest.TestCase):
         self._assert_mapper_presence(token)
         self._assert_userinfo_profile_claim()
 
-    def _write_env_file(self) -> str:
-        """Create temporary env file consumed by the CLI script."""
-        env_content = (
+    def _env_content(self) -> str:
+        """Build the env file content consumed by the CLI script."""
+        return (
             f"KEYCLOAK_BASE_URL={self.base_url}\n"
             f"KEYCLOAK_CONTEXT_PATH=/\n"
             f"KEYCLOAK_REALM={self.realm}\n"
-            f"KEYCLOAK_CLIENT_ID={self.target_client_id}\n"
+            f"KEYCLOAK_MAPPER_CLIENT_ID={self.target_client_id}\n"
             f"KEYCLOAK_ADMIN_CLIENT_ID={self.admin_client_id}\n"
             f"KEYCLOAK_ADMIN_CLIENT_SECRET={self.admin_client_secret}\n"
             f"KEYCLOAK_PROFILE_BASE_URL=https://localhost\n"
             f"KEYCLOAK_USER_PROFILES=[\"{self.username}\"]\n"
         )
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".env",
-            delete=False,
-            encoding="utf-8",
-        ) as file_handle:
-            file_handle.write(env_content)
-            return file_handle.name
 
     def _run_configuration_script(self, env_file: str) -> None:
         """Execute configurator module with generated env file."""

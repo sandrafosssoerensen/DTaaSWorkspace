@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import ssl
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -32,8 +33,8 @@ def http_json(
         data=_body(data, content_type),
     )
     try:
-        # noqa: S310 - integration test target is controlled
-        with urlopen(request, timeout=30) as response:
+        ctx = ssl.create_default_context()
+        with urlopen(request, timeout=30, context=ctx) as response:  # noqa: S310
             raw = response.read().decode("utf-8")
             return json.loads(raw) if raw else {}
     except HTTPError as exc:
@@ -105,7 +106,7 @@ def create_client(base_url: str, token: str, realm: str, client_id: str) -> str:
             "publicClient": True,
             "directAccessGrantsEnabled": True,
             "standardFlowEnabled": True,
-            "redirectUris": ["*"],
+            "redirectUris": ["http://localhost:8080/callback"],
         },
     )
     clients = http_json(
@@ -236,5 +237,3 @@ def userinfo(base_url: str, realm: str, access_token: str) -> dict[str, Any]:
         token=access_token,
     )
     return payload if isinstance(payload, dict) else {}
-
-
