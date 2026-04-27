@@ -222,6 +222,11 @@ async def login(
     return response
 
 
+@app.get("/health")
+async def health() -> Response:
+    return Response(status_code=200)
+
+
 @app.get("/logout")
 @app.get("/login-relay/logout")
 async def logout() -> RedirectResponse:

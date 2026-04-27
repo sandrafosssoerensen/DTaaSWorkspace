@@ -179,11 +179,19 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
+      login-relay:
+        condition: service_healthy
 
   login-relay:
     build:
       context: ./login-relay
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     environment:
       # Public Keycloak URL — used to build the browser-facing auth redirect.
       - KEYCLOAK_PUBLIC_URL=https://${SERVER_DNS:-localhost}/auth
