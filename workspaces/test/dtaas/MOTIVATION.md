@@ -143,13 +143,26 @@ workspaces/test/dtaas/
 │   └── access-rules.yml                  per-route rules (template; env vars substituted at container startup)
 ├── login-relay/
 │   ├── Dockerfile                         pinned python:3.12.9-slim; non-root appuser
-│   ├── requirements.txt                   FastAPI, uvicorn, authlib, httpx
-│   └── main.py                           login relay service
-│       ├── GET  /login-relay             initiate Keycloak login; set oauth_state cookie
-│       ├── GET  /login-relay/callback    exchange code; set dtaas_access_token cookie
-│       ├── GET  /logout                  clear cookie; redirect to Keycloak end session
-│       └── POST /authz/workspace/{user}  remote_json RBAC endpoint (called by Oathkeeper)
+│   ├── requirements.txt                   FastAPI, uvicorn, authlib, httpx, pydantic
+│   ├── requirements-dev.txt               pytest (test dependencies, not installed in image)
+│   ├── main.py                           login relay service
+│   │   ├── GET  /health                  liveness probe (used by compose healthcheck)
+│   │   ├── GET  /login-relay             initiate Keycloak login; set oauth_state cookie
+│   │   ├── GET  /login-relay/callback    exchange code; set dtaas_access_token cookie
+│   │   ├── GET  /logout                  clear cookie; redirect to Keycloak end session
+│   │   └── POST /authz/workspace/{user}  remote_json RBAC endpoint (called by Oathkeeper)
+│   └── tests/
+│       ├── conftest.py                   sets required env vars before import
+│       └── test_main.py                  unit + integration tests for all endpoints and helpers
 └── compose.traefik.secure.tls.yml        production TLS deployment
+```
+
+### Running Tests
+
+```bash
+cd workspaces/test/dtaas/login-relay
+pip install -r requirements.txt -r requirements-dev.txt
+pytest tests/ -v
 ```
 
 ---
@@ -165,6 +178,7 @@ pattern is non-overlapping by design.
 | `dtaas-spa-gateway` | `/`, `/library/…`, `/digitaltwins/…`, `/preview/…`, `/create/…`, `/static/…`, `/env.js`, `/favicon.ico`, `/manifest.json`, `/logo*` | `oauth2_introspection` (cookie) | `allow` |
 | `dtaas-user1-workspace` | `/${USERNAME1}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAME1}` |
 | `dtaas-user2-workspace` | `/${USERNAME2}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAME2}` |
+| *(user3, etc.)* | `/${USERNAMEn}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAMEn}` |
 | `dtaas-login-relay-public` | `/login-relay*`, `/logout` | `noop` | `allow` |
 | `dtaas-public-health` | `/health` | `noop` | `allow` |
 
@@ -207,8 +221,71 @@ See [`KEYCLOAK_SETUP.md`](KEYCLOAK_SETUP.md) for step-by-step Keycloak configura
 | `KEYCLOAK_REALM` | login-relay, Oathkeeper | Keycloak realm name (`dtaas`) |
 | `KEYCLOAK_INTROSPECTION_URL` | Oathkeeper | Keycloak introspection endpoint URL |
 | `KEYCLOAK_INTROSPECTION_BASIC_AUTH` | Oathkeeper | Base64-encoded `client_id:secret` (computed by compose entrypoint) |
-| `USERNAME1`, `USERNAME2` | login-relay, Oathkeeper | Workspace usernames (substituted into access rules at startup) |
+| `USERNAME1`, `USERNAME2` | Oathkeeper | Workspace usernames (substituted into access rules at startup) |
+| `WORKSPACE_USERS` | login-relay | Comma-separated list of workspace usernames for redirect-loop detection (e.g. `user1,user2`) |
 | `LOGIN_RELAY_URL` | Oathkeeper | URL of the login-relay redirect target |
+
+---
+
+## Known Limitations
+
+### 1. Session lifetime — users re-authenticate every 5 minutes
+
+`dtaas_access_token` is set with `max_age=300` (5 minutes), matching Keycloak's default access
+token lifespan. The `/login-relay` endpoint also sets `prompt=login`, which forces Keycloak to
+show the login form even when an SSO session already exists.
+
+Combined effect: every 5 minutes the browser is redirected to Keycloak and the user must type
+their password again. Active WebSocket connections (VS Code, Jupyter terminals) will drop silently.
+
+**To extend the session lifetime:**
+
+1. In Keycloak admin → Realm settings → Tokens → set **Access Token Lifespan** to the desired
+   value (e.g. `1h`).
+2. Update `max_age` in `login-relay/main.py` in the `callback` endpoint to match (e.g. `3600`).
+3. Remove `"prompt": "login"` from the `params` dict in the `login` endpoint if you want Keycloak
+   SSO sessions to be honoured (i.e. users stay logged in across browser sessions without
+   re-entering credentials).
+
+> **Why `prompt=login` was added:** the DTaaS SPA has its own separate PKCE login flow. Without
+> `prompt=login`, a user who completes the SPA login first can silently acquire a workspace cookie
+> without being aware of it — the two sessions become coupled in non-obvious ways. `prompt=login`
+> keeps the two flows independent. Remove it only if this coupling is acceptable.
+
+---
+
+### 2. Scalability — adding users requires changes in four places
+
+The current design has one Oathkeeper access rule and one Docker Compose service per user.
+Adding a third user (`user3`) requires editing:
+
+| File | Change needed |
+|---|---|
+| `compose.traefik.secure.tls.yml` | New `user3:` service block + Traefik labels |
+| `oathkeeper/access-rules.yml` | New `dtaas-user3-workspace` rule |
+| Oathkeeper `environment:` in compose | Add `USERNAME3=...` + `sed` substitution line in entrypoint |
+| Login-relay `environment:` in compose | Add `user3` to `WORKSPACE_USERS` |
+
+**Practical limit:** ~5–10 users before the config becomes unmanageable.
+
+**Path forward for larger deployments:** replace the per-user Oathkeeper rules with a single
+wildcard rule that matches `/<any-username>(/.*)?` and delegates all RBAC to the
+`/authz/workspace/{path_prefix}` endpoint. Oathkeeper would pass the path prefix as the
+`path_prefix` parameter; login-relay already has the logic to accept or reject it. This requires
+upgrading Oathkeeper's rule matching to use a capture group and passing the captured segment to
+the `remote_json` URL — something Oathkeeper's Go template syntax supports but is non-trivial
+to test. Dynamic workspace registration (a user registry) would also be needed so the
+login-relay knows which prefixes are valid without `WORKSPACE_USERS` being a static list.
+
+---
+
+### 3. `/authz/workspace` endpoint is unauthenticated
+
+`POST /authz/workspace/{path_prefix}` is called server-to-server by Oathkeeper and has no
+authentication of its own. Any service on the same Docker network can call it and receive a 200
+or 403. This is acceptable for the current threat model (the Docker network is private and the
+endpoint is not exposed via Traefik), but should be noted for deployments where the Docker network
+is shared across tenants.
 
 ---
 
