@@ -224,6 +224,7 @@ async def login(
 
 @app.get("/health")
 async def health() -> Response:
+    """Return 200 OK for liveness probes."""
     return Response(status_code=200)
 
 
