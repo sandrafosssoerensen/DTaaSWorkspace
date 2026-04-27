@@ -194,8 +194,8 @@ services:
       - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
       - SERVER_DNS=${SERVER_DNS}
       # Workspace prefixes — used to detect unknown paths and avoid redirect loops.
-      - USERNAME1=${USERNAME1:-user1}
-      - USERNAME2=${USERNAME2:-user2}
+      # Add new users here as a comma-separated list; no code changes needed.
+      - WORKSPACE_USERS=${USERNAME1:-user1},${USERNAME2:-user2}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.login-relay.entryPoints=web-secure"

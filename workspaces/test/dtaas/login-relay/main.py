@@ -46,15 +46,12 @@ SERVER_DNS = os.environ["SERVER_DNS"]
 
 # Workspace path prefixes — paths that have an Oathkeeper rule and should be
 # preserved in the return_to redirect after Keycloak login.
-# Unknown paths (e.g. /user1 when USERNAME1=sandra) match no Oathkeeper rule
-# and would cause a redirect loop. For those we fall back to "/" so the user
-# lands on the SPA root instead of looping indefinitely.
+# Unknown paths match no Oathkeeper rule and would cause a redirect loop.
+# For those we fall back to "/" so the user lands on the SPA root instead.
+# Configure via WORKSPACE_USERS=user1,user2,user3 (comma-separated).
 _WORKSPACE_PREFIXES = tuple(
     f"/{u.strip('/')}"
-    for u in [
-        os.environ.get("USERNAME1", "user1"),
-        os.environ.get("USERNAME2", "user2"),
-    ]
+    for u in os.environ.get("WORKSPACE_USERS", "user1,user2").split(",")
     if u.strip("/")
 )
 # Known SPA path prefixes — must stay in sync with the dtaas-spa-gateway rule.
@@ -133,7 +130,7 @@ def _safe_return_to(return_to: str) -> str:
     path (and query) strips the scheme/host entirely, so the post-login redirect
     is always resolved relative to the current HTTPS origin by the browser.
 
-    Paths that have no Oathkeeper access rule (e.g. /user1 when USERNAME1=sandra)
+    Paths that have no Oathkeeper access rule (e.g. /user1 when not in WORKSPACE_USERS)
     would cause an infinite redirect loop after Keycloak login because Oathkeeper
     returns "no rule matched" and fires the redirect error handler again.  Such
     paths are normalised to "/" so the user lands on the SPA root instead.

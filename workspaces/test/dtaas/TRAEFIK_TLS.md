@@ -210,7 +210,18 @@ docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml  --env-fi
 
 ### Adding More Users
 
-To add additional workspace instances, add a new service in `compose.traefik.secure.tls.yml`:
+Follow these steps to add a third user (replace `user3` with the actual username
+throughout).
+
+**1. Add the new username to `config/.env`:**
+
+```bash
+USERNAME3=user3
+# Keep WORKSPACE_USERS in sync — add the new name to the comma-separated list.
+WORKSPACE_USERS=user1,user2,user3
+```
+
+**2. Add a new workspace service to `compose.traefik.secure.tls.yml`:**
 
 ```yaml
   user3:
@@ -234,18 +245,23 @@ To add additional workspace instances, add a new service in `compose.traefik.sec
       - users
 ```
 
-Also add `USERNAME3=${USERNAME3:-user3}` to the `environment` section of both
-the `oathkeeper` and `login-relay` services.
+Also add `USERNAME3=${USERNAME3:-user3}` to the `environment` section of the
+`oathkeeper` service (it substitutes the username into `access-rules.yml`).
 
-**2. Add an access rule in `oathkeeper/access-rules.yml`:**
+The `login-relay` service already picks up the new user from `WORKSPACE_USERS`
+set in step 1 — no further compose change is needed for login-relay.
+
+**3. Add an access rule in `oathkeeper/access-rules.yml`:**
 
 ```yaml
 - id: dtaas-user3-workspace
   version: "v0.36.0-beta.1"
   description: >
-    Requires a valid Keycloak JWT. Proxies to the user3 workspace container.
+    Requires a valid Keycloak JWT whose username matches the path prefix
+    (${USERNAME3}). The remote_json authorizer delegates the per-user check
+    to login-relay, which returns 200 only when the token belongs to that user.
   match:
-    url: "<^https?://[^/]*/user3(/.*)?$>"
+    url: "<^https?://[^/]*/${USERNAME3}(/.*)?$>"
     methods:
       - GET
       - HEAD
@@ -266,21 +282,25 @@ the `oathkeeper` and `login-relay` services.
         token_from:
           cookie: dtaas_access_token
   authorizer:
-    handler: allow
+    handler: remote_json
+    config:
+      remote: http://login-relay:8080/authz/workspace/${USERNAME3}
+      payload: '{"subject":{"id":{{ .Subject | toJson }},"extra":{{ .Extra | toJson }}}}'
   mutators:
     - handler: header
 ```
 
-Replace `user3` in the `url` regexp and `upstream.url` with the actual username.
+Replace the literal `user3` in `upstream.url` with the actual username.
+The `${USERNAME3}` placeholders are substituted at Oathkeeper startup by the
+compose entrypoint.
 
 **Note**: Oathkeeper v26 with `regexp` matching strategy requires that URL
 patterns do not overlap. Verify no other rule's pattern matches the same URLs.
 
-**3. Add `USERNAME3` to `.env`:**
-
-```bash
-USERNAME3=user3
-```
+**Note**: The `remote_json` authorizer is required for per-user enforcement —
+it ensures that only the user whose username matches the path prefix can access
+that workspace. Using `allow` instead would let any authenticated user access
+any workspace.
 
 **4. Create the user directory:**
 
@@ -290,6 +310,14 @@ sudo chown -R 1000:100 workspaces/test/dtaas/files
 ```
 
 **5. Create the user in Keycloak** (see [KEYCLOAK_SETUP.md](KEYCLOAK_SETUP.md)).
+
+**6. Redeploy:**
+
+```bash
+docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
+  --env-file workspaces/test/dtaas/config/.env \
+  up -d --build --force-recreate
+```
 
 ## 🐛 Troubleshooting
 
