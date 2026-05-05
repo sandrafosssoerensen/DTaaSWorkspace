@@ -209,7 +209,6 @@ replace_in_file(NGINX_FILE, "{WORKSPACE_BASE_URL_DECODED}",
 ### 3. Version String Duplication (DRY Violation)
 
 **Files:**
-- `workspaces/Dockerfile.ubuntu.noble.gnome:69`
 - `workspaces/src/admin/pyproject.toml:3`
 - `workspaces/src/admin/src/admin/main.py:42`
 - `workspaces/src/admin/src/admin/main.py:53`
@@ -1193,7 +1192,7 @@ def main() -> None:
 
 ### 13. No Container Health Check
 
-**File:** `workspaces/Dockerfile.ubuntu.noble.gnome`  
+**File:** `workspaces/Dockerfile.ubuntu.noble.xfce`  
 **Lines:** 1-100+
 
 **Problem:**
@@ -1427,7 +1426,7 @@ cd workspace
 
 # Build the image
 cd workspaces
-docker build -t workspace:dev -f Dockerfile.ubuntu.noble.gnome .
+docker build -t workspace:dev -f Dockerfile.ubuntu.noble.xfce .
 
 # Run locally
 docker compose -f test/dtaas/compose.yml up
@@ -1448,7 +1447,7 @@ poetry run pylint src/admin tests
 poetry run pytest --cov
 
 # Lint Dockerfile
-hadolint Dockerfile.ubuntu.noble.gnome
+hadolint Dockerfile.ubuntu.noble.xfce
 ```
 
 ### Code Style

@@ -143,7 +143,7 @@ user3:
   restart: unless-stopped
     build:
       context: ../..
-      dockerfile: Dockerfile.ubuntu.noble.gnome
+      dockerfile: Dockerfile.ubuntu.noble.xfce
   environment:
     - MAIN_USER=${USERNAME3:-user3}
   volumes:

@@ -48,7 +48,7 @@ docker compose -f workspaces/test/dtaas/compose.yml build
 Or using the standard build command:
 
 ```bash
-docker build -t workspace:latest -f workspaces/Dockerfile.ubuntu.noble.gnome \
+docker build -t workspace:latest -f workspaces/Dockerfile.ubuntu.noble.xfce \
   ./workspaces
 ```
 

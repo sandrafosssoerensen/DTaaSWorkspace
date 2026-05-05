@@ -9,14 +9,14 @@ working is subject to change.
 
 Pre-built Docker images are available from:
 
+### Standard Workspace (Ubuntu 24.04 Noble + XFCE)
+
 - **GitHub Container Registry**:
   `ghcr.io/into-cps-association/workspace:latest`
 - **Docker Hub**: `intocps/workspace:latest`
 
-You can pull the image directly:
-
 ```bash
-# From GitHub Container Registry
+# Standard image from GitHub Container Registry
 docker pull ghcr.io/into-cps-association/workspace:latest
 
 # From Docker Hub
@@ -33,7 +33,7 @@ If you want to build the image locally instead of using pre-built images, then:
 Using plain `docker` command:
 
 ```ps1
-docker build -t workspace:latest -f workspaces/Dockerfile.ubuntu.noble.gnome ./workspaces
+docker build -t workspace:latest -f workspaces/Dockerfile.ubuntu.noble.xfce ./workspaces
 ```
 
 **Or**
@@ -51,18 +51,18 @@ To build images for multiple architectures (amd64 and arm64):
 # Create and use a multi-platform builder (one-time setup)
 docker buildx create --name multiarch --use
 
-# Build for multiple platforms
+# Build standard image for multiple platforms
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t workspace:latest \
-  -f workspaces/Dockerfile.ubuntu.noble.gnome \
+  -f workspaces/Dockerfile.ubuntu.noble.xfce \
   ./workspaces
 
 # To build and push to a registry (e.g., Docker Hub or GHCR)
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t your-registry/workspace:latest \
-  -f workspaces/Dockerfile.ubuntu.noble.gnome \
+  -f workspaces/Dockerfile.ubuntu.noble.xfce \
   --push \
   ./workspaces
 ```
@@ -211,7 +211,7 @@ This is done by adding the setting the build argument `INSTALLATION` to `minimal
 
 ```
 docker build -t workspace:latest \
-  -f workspaces/Dockerfile.ubuntu.noble.gnome \
+  -f workspaces/Dockerfile.ubuntu.noble.xfce \
   --build-arg INSTALLATION=minimal \
   ./workspaces
 ```

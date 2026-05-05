@@ -163,7 +163,7 @@ To add additional workspace instances, add a new service in `compose.traefik.sec
     restart: unless-stopped
     build:
       context: ../..
-      dockerfile: Dockerfile.ubuntu.noble.gnome
+      dockerfile: Dockerfile.ubuntu.noble.xfce
     environment:
       - MAIN_USER=${USERNAME3:-user3}
     volumes:

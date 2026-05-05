@@ -6,12 +6,21 @@ and build process.
 
 ## Table of Contents
 
+- [Available Images](#available-images)
 - [Docker Build Arguments](#docker-build-arguments)
 - [Dockerfile Environment Variables](#dockerfile-environment-variables)
 - [Runtime Environment Variables](#runtime-environment-variables)
 - [Multi-Architecture Build](#multi-architecture-build)
 - [Installation Scripts](#installation-scripts)
 - [Startup Scripts](#startup-scripts)
+
+## Available Images
+
+The one Dockerfile variant:
+
+| Dockerfile | Base Image | Desktop | Ubuntu Version |
+| --- | --- | --- | --- |
+| `Dockerfile.ubuntu.noble.xfce` | `kasmweb/core-ubuntu-noble:1.18.0` | XFCE | 24.04 (Noble) |
 
 ## Docker Build Arguments
 
@@ -25,7 +34,7 @@ multi-platform builds, while others (`INSTALLATION`) can be set manually, changi
 - **Possible Values**: `full` or `minimal`
 - **Default**: `full`
 - **Usage**: Set it explicitly when building the image to change what services are installed:
-`docker build -t workspace:latest -f workspaces/Dockerfile.ubuntu.noble.gnome --build-arg INSTALLATION=minimal ./workspaces`
+`docker build -t workspace:latest -f workspaces/Dockerfile.ubuntu.noble.xfce --build-arg INSTALLATION=minimal ./workspaces`
 - **Example**:
 
   ```dockerfile
@@ -252,7 +261,7 @@ docker buildx create --name multiarch --use
 
 # Single-platform build and load into local Docker
 docker build -t workspace:latest \
-  -f workspaces/Dockerfile.ubuntu.noble.gnome \
+  -f workspaces/Dockerfile.ubuntu.noble.xfce \
   --build-arg INSTALLATION=minimal \
   ./workspaces
 
@@ -261,7 +270,7 @@ docker build -t workspace:latest \
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t workspace:minimal-build \
-  -f workspaces/Dockerfile.ubuntu.noble.gnome \
+  -f workspaces/Dockerfile.ubuntu.noble.xfce \
   --build-arg INSTALLATION=minimal \
   ./workspaces
 
@@ -270,7 +279,7 @@ docker buildx build \
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t workspace:minimal-build \
-  -f workspaces/Dockerfile.ubuntu.noble.gnome \
+  -f workspaces/Dockerfile.ubuntu.noble.xfce \
   --build-arg INSTALLATION=minimal \
   --push \
   ./workspaces
@@ -280,14 +289,14 @@ docker buildx build \
 docker buildx build \
   --platform linux/amd64 \
   -t workspace-amd64 \
-  -f workspaces/Dockerfile.ubuntu.noble.gnome \
+  -f workspaces/Dockerfile.ubuntu.noble.xfce \
   --output type=docker,dest=./workspace-amd64.tar \
   ./workspaces
 
 docker buildx build \
   --platform linux/arm64 \
   -t workspace-arm64 \
-  -f workspaces/Dockerfile.ubuntu.noble.gnome \
+  -f workspaces/Dockerfile.ubuntu.noble.xfce \
   --output type=docker,dest=./workspace-arm64.tar \
   ./workspaces
 

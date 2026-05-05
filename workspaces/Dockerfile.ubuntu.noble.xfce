@@ -28,41 +28,42 @@ ENV ADMIN_SERVER_PORT=8091 \
 
 WORKDIR $HOME
 
-# Configure locale generation to only build en_US.UTF-8 to reduce build time
-RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
-    rm -rf /var/lib/locales/supported.d/*
-
 COPY ./src/install/ ${INST_DIR}
 COPY ./src/admin/ ${ADMIN_DIR}
 
+RUN bash ${INST_DIR}/image_wegovy.sh
+
 FROM configure AS install-full
 
-RUN bash ${INST_DIR}/firefox/install_firefox.sh && \
-    bash ${INST_DIR}/nginx/install_nginx.sh && \
-    bash ${INST_DIR}/vscode/install_vscode_server.sh && \
-    bash ${INST_DIR}/jupyter/install_jupyter.sh && \
-    bash ${INST_DIR}/admin/install_admin.sh && \
-    bash ${INST_DIR}/dtaas_cleanup.sh
+RUN bash ${INST_DIR}/firefox/install_firefox.sh
+RUN bash ${INST_DIR}/nginx/install_nginx.sh
+RUN bash ${INST_DIR}/vscode/install_vscode_server.sh
+RUN bash ${INST_DIR}/jupyter/install_jupyter.sh
+RUN bash ${INST_DIR}/admin/install_admin.sh
+RUN bash ${INST_DIR}/dtaas_cleanup.sh
+RUN bash ${INST_DIR}/kasm_fixes.sh
 
 FROM configure AS install-minimal
 
-# Tells the custom_startup script to not try to start the vscode server
+# Tells the custom_startup script to not try to start vscode server or jupyter
 ENV VSCODE_DISABLED=1 \
     JUPYTER_DISABLED=1
 
-RUN bash ${INST_DIR}/nginx/install_nginx.sh && \
-    bash ${INST_DIR}/admin/install_admin.sh && \
-    bash ${INST_DIR}/dtaas_cleanup.sh
+RUN bash ${INST_DIR}/nginx/install_nginx.sh
+RUN bash ${INST_DIR}/admin/install_admin.sh
+RUN bash ${INST_DIR}/dtaas_cleanup.sh
+RUN bash ${INST_DIR}/kasm_fixes.sh
 
 FROM install-${INSTALLATION} AS setup
 
 COPY ./src/startup/ ${STARTUPDIR}
 
 COPY ./src/resources/kasm_vnc/kasmvnc.yaml /etc/kasmvnc/
-COPY ./src/resources/jupyter/jupyter_notebook_config.py /etc/jupyter/
+COPY ./src/resources/jupyter/jupyter_notebook_config.py /home/kasm-default-profile/.jupyter/
+COPY ./src/resources/xfce4/* /home/kasm-default-profile/.config/xfce4/xfconf/xfce-perchannel-xml/
 
 RUN chown 1000:0 ${HOME} && \
-    "${STARTUPDIR}"/set_user_permission.sh ${HOME} && \
+    ${STARTUPDIR}/set_user_permission.sh ${HOME} && \
     rm -Rf ${INST_DIR}
 
 RUN mkdir ${PERSISTENT_DIR} && \
@@ -75,21 +76,21 @@ RUN mkdir -p /www/Downloads && \
 RUN adduser "$(id -un 1000)" sudo && \
     passwd -d "$(id -un 1000)"
 
-RUN python3 -c "import os, shlex; print('\n'.join(f'export {k}={shlex.quote(v)}' for k, v in os.environ.items()))" >> /tmp/.docker_set_envs && \
-    chmod 755 /tmp/.docker_set_envs
+RUN python3 -c "import os, shlex; print('\n'.join(f'export {k}={shlex.quote(v)}' for k, v in os.environ.items()))" >> ${STARTUPDIR}/.docker_set_envs && \
+    chmod 755 ${STARTUPDIR}/.docker_set_envs
 
 FROM scratch AS deploy
 COPY --from=setup / /
 
 LABEL org.opencontainers.image.title="workspace" \
-      org.opencontainers.image.description="A containerized virtual desktop environment with KasmVNC, Firefox, Jupyter, and VS Code Server for DTaaS" \
+      org.opencontainers.image.description="A lightweight containerized virtual desktop environment with KasmVNC, Firefox, Jupyter, and VS Code Server for DTaaS" \
       org.opencontainers.image.vendor="INTO-CPS Association" \
       org.opencontainers.image.authors="[Prasad Talasila <prasad.talasila@ece.au.dk>, Aleksander Ross Møller <aleksander.r.m@protonmail.com>]" \
       org.opencontainers.image.url="https://github.com/INTO-CPS-Association/workspace" \
       org.opencontainers.image.source="https://github.com/INTO-CPS-Association/workspace" \
       org.opencontainers.image.documentation="https://github.com/INTO-CPS-Association/workspace/blob/main/README.md" \
       org.opencontainers.image.licenses="[https://github.com/INTO-CPS-Association/workspace/blob/main/LICENSE.md, https://github.com/kasmtech/workspaces-core-images/blob/release/1.18.0/LICENSE.md]" \
-      org.opencontainers.image.version="0.1.0"
+      org.opencontainers.image.version="0.2.0"
 
 EXPOSE 8080
 

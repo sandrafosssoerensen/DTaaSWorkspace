@@ -5,7 +5,7 @@
 
 set -e
 
-source "/tmp/.docker_set_envs"
+source "/dockerstartup/.docker_set_envs"
 
 if [[ ${DEBUG_ALL:-0} == 1 ]]; then
     export KASM_DEBUG=1
