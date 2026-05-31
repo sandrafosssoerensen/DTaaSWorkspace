@@ -1,0 +1,65 @@
+name: Keycloak Python Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - workspaces/test/dtaas/keycloak/**
+      - .github/workflows/keycloak-python-tests.yml
+  pull_request:
+    paths:
+      - workspaces/test/dtaas/keycloak/**
+      - .github/workflows/keycloak-python-tests.yml
+  workflow_dispatch:
+    inputs:
+      runIntegration:
+        description: Run Docker-backed Keycloak integration test
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  keycloak-unit-tests:
+    name: Keycloak Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests (integration skipped by default)
+        run: |
+          python -m unittest discover \
+            -s workspaces/test/dtaas/keycloak \
+            -p "test_*.py"
+
+  keycloak-integration-test:
+    name: Keycloak Integration Test
+    runs-on: ubuntu-latest
+    needs: keycloak-unit-tests
+    if: github.event_name == 'workflow_dispatch' && inputs.runIntegration == true
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Run real Keycloak integration test
+        env:
+          RUN_KEYCLOAK_INTEGRATION: "1"
+          KEYCLOAK_INTEGRATION_TIMEOUT: "420"
+        run: |
+          python -m unittest \
+            workspaces.test.dtaas.keycloak.test.test_integration_keycloak_rest
