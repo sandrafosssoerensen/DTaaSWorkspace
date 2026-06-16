@@ -327,10 +327,13 @@ class TestWorkspaceRedirectTree:
         c = TestClient(app, follow_redirects=False, cookies={"dtaas_access_token": token})
         resp = c.get("/workspace-redirecttree/functions")
         assert resp.status_code == 302
-        assert resp.headers["location"] == "/login-relay?return_to=/workspace-redirecttree/functions"
+        expected = "/login-relay?return_to=/workspace-redirecttree/functions"
+        assert resp.headers["location"] == expected
 
     def test_missing_cookie_redirects_to_login(self):
         """Missing cookie triggers login redirect, preserving the original path."""
         resp = client.get("/workspace-redirecttree/functions")
         assert resp.status_code == 302
-        assert resp.headers["location"] == "/login-relay?return_to=/workspace-redirecttree/functions"
+        expected = "/login-relay?return_to=/workspace-redirecttree/functions"
+        assert resp.headers["location"] == expected
+
