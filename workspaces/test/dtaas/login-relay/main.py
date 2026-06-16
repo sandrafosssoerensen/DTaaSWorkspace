@@ -22,10 +22,12 @@ from fastapi import Cookie, FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
+import time
+
 from _config import KEYCLOAK_CLIENT_ID, SERVER_DNS
 from _helpers import (
     _auth_url_public, _build_auth_params, _check_cross_user_redirect,
-    _fetch_tokens, _generate_state, _public_realm_url,
+    _decode_jwt_claims, _fetch_tokens, _generate_state, _public_realm_url,
     _safe_return_to, _set_access_token_cookie, _set_short_cookie,
     _validate_id_token, _verify_state,
 )
@@ -37,6 +39,29 @@ class _AuthzBody(BaseModel):
     """Payload sent by Oathkeeper's remote_json authorizer."""
 
     subject: dict = Field(default_factory=dict)
+
+
+@app.get("/workspace-redirecttree/{path:path}")
+async def workspace_redirect(
+    path: str,
+    dtaas_access_token: str = Cookie(default=""),
+) -> RedirectResponse:
+    """Redirect to the authenticated user's Jupyter tree path.
+
+    The SPA constructs iframes as REACT_APP_URL + userName + LIBLINK + "tree/{dir}".
+    With an empty GitLab userName, the generated URL is
+    /workspace-redirecttree/{dir} (LIBLINK="workspace-redirect", no separator).
+    This endpoint reads preferred_username from the cookie and redirects to
+    /{username}/tree/{path} so all users share one static client.js.
+    """
+    claims = _decode_jwt_claims(dtaas_access_token)
+    username = claims.get("preferred_username", "")
+    if not username or claims.get("exp", 0) <= time.time():
+        return RedirectResponse(
+            url=f"/login-relay?return_to=/workspace-redirecttree/{path}",
+            status_code=302,
+        )
+    return RedirectResponse(url=f"/{username}/tree/{path}", status_code=302)
 
 
 @app.post("/authz/workspace/{path_prefix}", status_code=200)

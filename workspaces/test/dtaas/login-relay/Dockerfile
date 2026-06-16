@@ -9,7 +9,7 @@ RUN groupadd --system appuser \
 COPY --chown=appuser:appuser requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY --chown=appuser:appuser main.py .
+COPY --chown=appuser:appuser main.py _helpers.py _config.py ./
 
 EXPOSE 8080
 

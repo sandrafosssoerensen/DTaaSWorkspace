@@ -12,6 +12,7 @@ services:
     command:
       - "--log.level=INFO"
       - "--providers.docker=true"
+      - "--providers.docker.constraints=Label(`com.docker.compose.project`,`dtaas`)"
       - "--entryPoints.web.address=:80"
       - "--entrypoints.web-secure.address=:443"
       - "--entrypoints.web.http.redirections.entryPoint.to=web-secure"

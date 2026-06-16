@@ -16,6 +16,7 @@ WORKSPACE_PREFIXES = tuple(
 SPA_PREFIXES = (
     "/library", "/digitaltwins", "/preview", "/create",
     "/static", "/env.js", "/favicon.ico", "/manifest.json", "/logo",
+    "/workspace-redirecttree",
 )
 
 # Optional OIDC URL overrides for non-Keycloak providers (e.g. Dex in CI).

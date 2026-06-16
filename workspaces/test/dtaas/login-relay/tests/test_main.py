@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from main import app, _decode_jwt_claims, _is_routable, _safe_return_to
+from main import app
+from _helpers import _decode_jwt_claims, _is_routable, _safe_return_to
 
 client = TestClient(app, follow_redirects=False)
 
@@ -71,6 +72,11 @@ class TestIsRoutable:
     def test_spa_subpath(self):
         """Nested SPA path is routable."""
         assert _is_routable("/digitaltwins/mydt") is True
+
+    def test_workspace_redirect_tree_routable(self):
+        """workspace-redirecttree paths are routable so login return_to is preserved."""
+        assert _is_routable("/workspace-redirecttree/functions") is True
+        assert _is_routable("/workspace-redirecttree/common") is True
 
     def test_unknown_path_returns_false(self):
         """Path under an unknown workspace prefix is not routable."""
@@ -267,7 +273,7 @@ class TestCallback:
             app, follow_redirects=False, cookies={"oauth_state": f"{nonce}:{return_to_b64}"}
         )
 
-        with patch("main._fetch_access_token", new=AsyncMock(return_value="fake-token")):
+        with patch("main._fetch_tokens", new=AsyncMock(return_value=("fake-token", "", 3600))):
             resp = c.get(f"/login-relay/callback?code=authcode&state={nonce}")
 
         assert resp.status_code == 302
@@ -282,8 +288,49 @@ class TestCallback:
             app, follow_redirects=False, cookies={"oauth_state": f"{nonce}:{return_to_b64}"}
         )
 
-        with patch("main._fetch_access_token", new=AsyncMock(return_value="fake-token")):
+        with patch("main._fetch_tokens", new=AsyncMock(return_value=("fake-token", "", 3600))):
             resp = c.get(f"/login-relay/callback?code=authcode&state={nonce}")
 
         assert resp.status_code == 302
         assert resp.headers["location"] == "/"
+
+
+# ---------------------------------------------------------------------------
+# GET /workspace-redirecttree/{path}
+# ---------------------------------------------------------------------------
+
+class TestWorkspaceRedirectTree:
+    """Tests for the /workspace-redirecttree/{path} cookie-to-username redirect."""
+
+    def test_authenticated_user_redirected_to_tree(self):
+        """Valid cookie redirects to /{username}/tree/{path}."""
+        future = int(time.time()) + 3600
+        token = _make_jwt({"preferred_username": "user1", "exp": future})
+        c = TestClient(app, follow_redirects=False, cookies={"dtaas_access_token": token})
+        resp = c.get("/workspace-redirecttree/functions")
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/user1/tree/functions"
+
+    def test_common_path_redirected_correctly(self):
+        """Common directory path is resolved per authenticated user."""
+        future = int(time.time()) + 3600
+        token = _make_jwt({"preferred_username": "user2", "exp": future})
+        c = TestClient(app, follow_redirects=False, cookies={"dtaas_access_token": token})
+        resp = c.get("/workspace-redirecttree/common")
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/user2/tree/common"
+
+    def test_expired_token_redirects_to_login(self):
+        """Expired cookie triggers login redirect, preserving the original path."""
+        past = int(time.time()) - 1
+        token = _make_jwt({"preferred_username": "user1", "exp": past})
+        c = TestClient(app, follow_redirects=False, cookies={"dtaas_access_token": token})
+        resp = c.get("/workspace-redirecttree/functions")
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/login-relay?return_to=/workspace-redirecttree/functions"
+
+    def test_missing_cookie_redirects_to_login(self):
+        """Missing cookie triggers login redirect, preserving the original path."""
+        resp = client.get("/workspace-redirecttree/functions")
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/login-relay?return_to=/workspace-redirecttree/functions"
