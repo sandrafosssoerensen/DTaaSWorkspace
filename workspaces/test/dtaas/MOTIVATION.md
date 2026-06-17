@@ -79,13 +79,13 @@ Oathkeeper is the proxy; Traefik is the TLS-terminating edge router.
 4. **login-relay** (`GET /login-relay`):
    - Generates a random CSRF state nonce
    - Stores `nonce:base64(return_to)` in a short-lived `oauth_state` HttpOnly cookie
-   - Redirects browser to Keycloak's `/auth` endpoint (authorization code flow, `prompt=login`)
+   - Redirects browser to Keycloak's `/auth` endpoint (authorization code flow)
 5. **Keycloak** presents the login form; user authenticates
 6. **Keycloak** redirects to `https://shared.example.com/login-relay/callback?code=…&state=<nonce>`
 7. **login-relay** (`GET /login-relay/callback`):
    - Reads `oauth_state` cookie; verifies `state == nonce` (constant-time, CSRF protection)
    - Exchanges auth code for access token **server-to-server** (confidential client, uses `KEYCLOAK_CLIENT_SECRET`)
-   - Sets `dtaas_access_token` cookie (`HttpOnly`, `Secure`, `SameSite=Lax`, `max_age=300`)
+   - Sets `dtaas_access_token` cookie (`HttpOnly`, `Secure`, `SameSite=Lax`, `max_age` = `expires_in` from token response)
    - Deletes `oauth_state` cookie
    - Redirects browser to the original path (`/user1/lab`)
 8. **Oathkeeper** reads `dtaas_access_token` cookie, introspects it against Keycloak → active → forwards to `http://user1:8080`
@@ -146,11 +146,12 @@ workspaces/test/dtaas/
 │   ├── requirements.txt                   FastAPI, uvicorn, authlib, httpx, pydantic
 │   ├── requirements-dev.txt               pytest (test dependencies, not installed in image)
 │   ├── main.py                           login relay service
-│   │   ├── GET  /health                  liveness probe (used by compose healthcheck)
-│   │   ├── GET  /login-relay             initiate Keycloak login; set oauth_state cookie
-│   │   ├── GET  /login-relay/callback    exchange code; set dtaas_access_token cookie
-│   │   ├── GET  /logout                  clear cookie; redirect to Keycloak end session
-│   │   └── POST /authz/workspace/{user}  remote_json RBAC endpoint (called by Oathkeeper)
+│   │   ├── GET  /health                          liveness probe (used by compose healthcheck)
+│   │   ├── GET  /login-relay                     initiate Keycloak login; set oauth_state cookie
+│   │   ├── GET  /login-relay/callback            exchange code; set dtaas_access_token cookie
+│   │   ├── GET  /logout                          clear cookie; redirect to Keycloak end session
+│   │   ├── GET  /workspace-redirecttree/{path}   resolve username from cookie → 302 /{user}/tree/{path}
+│   │   └── POST /authz/workspace/{user}          remote_json RBAC endpoint (called by Oathkeeper)
 │   └── tests/
 │       ├── conftest.py                   sets required env vars before import
 │       └── test_main.py                  unit + integration tests for all endpoints and helpers
@@ -179,6 +180,7 @@ pattern is non-overlapping by design.
 | `dtaas-user1-workspace` | `/${USERNAME1}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAME1}` |
 | `dtaas-user2-workspace` | `/${USERNAME2}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAME2}` |
 | *(user3, etc.)* | `/${USERNAMEn}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAMEn}` |
+| `dtaas-workspace-redirect` | `/workspace-redirecttree(/…)?` | `noop` | `allow` — login-relay resolves username from cookie and redirects to `/{user}/tree/{path}` |
 | `dtaas-login-relay-public` | `/login-relay*`, `/logout` | `noop` | `allow` |
 | `dtaas-public-health` | `/health` | `noop` | `allow` |
 
@@ -229,28 +231,24 @@ See [`KEYCLOAK_SETUP.md`](KEYCLOAK_SETUP.md) for step-by-step Keycloak configura
 
 ## Known Limitations
 
-### 1. Session lifetime — users re-authenticate every 5 minutes
+### 1. Session lifetime — WebSocket connections drop on re-authentication
 
-`dtaas_access_token` is set with `max_age=300` (5 minutes), matching Keycloak's default access
-token lifespan. The `/login-relay` endpoint also sets `prompt=login`, which forces Keycloak to
-show the login form even when an SSO session already exists.
+`dtaas_access_token` `max_age` is set to the `expires_in` value returned by Keycloak's token
+endpoint, so the cookie lifetime automatically matches the configured access token lifespan.
+When the token expires, the next browser request is redirected to Keycloak; if an SSO session is
+still active, Keycloak silently issues a new token and the user is redirected back without seeing
+a login form.
 
-Combined effect: every 5 minutes the browser is redirected to Keycloak and the user must type
-their password again. Active WebSocket connections (VS Code, Jupyter terminals) will drop silently.
+Active WebSocket connections (VS Code, Jupyter terminals) will drop silently when the redirect
+happens, because the tab navigates away.
 
-**To extend the session lifetime:**
+**To extend the session lifetime**, increase **Access Token Lifespan** in Keycloak admin →
+Realm settings → Tokens (e.g. `1h`). The cookie lifetime will follow automatically.
 
-1. In Keycloak admin → Realm settings → Tokens → set **Access Token Lifespan** to the desired
-   value (e.g. `1h`).
-2. Update `max_age` in `login-relay/main.py` in the `callback` endpoint to match (e.g. `3600`).
-3. Remove `"prompt": "login"` from the `params` dict in the `login` endpoint if you want Keycloak
-   SSO sessions to be honoured (i.e. users stay logged in across browser sessions without
-   re-entering credentials).
-
-> **Why `prompt=login` was added:** the DTaaS SPA has its own separate PKCE login flow. Without
-> `prompt=login`, a user who completes the SPA login first can silently acquire a workspace cookie
-> without being aware of it — the two sessions become coupled in non-obvious ways. `prompt=login`
-> keeps the two flows independent. Remove it only if this coupling is acceptable.
+> **Note:** `prompt=login` was intentionally removed. It was originally added to decouple the
+> workspace cookie session from the SPA's PKCE session, but it forced Keycloak to show the login
+> form on every re-auth — including inside iframes — causing a visible re-auth loop in the
+> Library tab. Without `prompt=login`, Keycloak honours its SSO session and re-auths silently.
 
 ---
 
@@ -279,7 +277,32 @@ login-relay knows which prefixes are valid without `WORKSPACE_USERS` being a sta
 
 ---
 
-### 3. `/authz/workspace` endpoint is unauthenticated
+### 3. Oathkeeper strips trailing slashes — workspace nginx must compensate
+
+Oathkeeper forwards requests to upstream containers without preserving trailing slashes on tool
+paths. Without compensation, `/tools/vscode` (no trailing slash) reaches the workspace nginx,
+which redirects to the base URL, which Oathkeeper intercepts again — producing an infinite 302
+loop.
+
+`workspaces/src/startup/nginx.conf` handles this by matching `/tools/vscode` and `/tools/vnc`
+**before** the generic trailing-slash redirect, and using an `if`-block to re-add the slash to
+the upstream path when it is absent:
+
+```nginx
+location ~* "^{WORKSPACE_BASE_URL_DECODED}/tools/vscode(?<remaining_part>.*)" {
+    if ($remaining_part !~ ^/(.*)$) {
+        set $remaining_part /$remaining_part;
+    }
+    proxy_pass http://vscode$remaining_part$is_args$args;
+}
+```
+
+The same pattern applies to the `/tools/vnc` location. This must be kept in sync whenever the
+nginx routing is changed.
+
+---
+
+### 4. `/authz/workspace` endpoint is unauthenticated
 
 `POST /authz/workspace/{path_prefix}` is called server-to-server by Oathkeeper and has no
 authentication of its own. Any service on the same Docker network can call it and receive a 200

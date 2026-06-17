@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Automate the OAuth2/OIDC login flow against a local Dex provider for
-headless CI testing with traefik-forward-auth.
+headless CI testing with Oathkeeper + login-relay.
 
 Usage:
     ci_auth_login.py [BASE_URL] [USERNAME] [DEX_BASE_URL] [PASSWORD]
@@ -18,16 +18,17 @@ Exit codes:
 
 How it works (no browser needed):
     1. GET <BASE_URL>/<USERNAME>/
-       -> traefik-forward-auth issues 302 to Dex /dex/auth?...
+       -> Oathkeeper sees no token, redirects to login-relay
+       -> login-relay redirects to Dex /dex/auth?...
        -> requests follows all redirects and lands on Dex's login page HTML
     2. Extract the form <action> URL from the Dex login page.
     3. POST username + password to that URL.
        -> Dex validates credentials, skips the approval screen, and issues
-          a 302 to <BASE_URL>/_oauth?code=XXX&state=XXX
-       -> requests follows the redirect; traefik-forward-auth exchanges the
-          code, validates the token, sets the _forward_auth cookie, and
-          issues a final 302 back to the original protected URL.
-    4. GET <BASE_URL>/<USERNAME>/ with the session cookie -> expect HTTP 200.
+          a 302 to <BASE_URL>/login-relay/callback?code=XXX&state=XXX
+       -> requests follows the redirect; login-relay exchanges the code,
+          sets the dtaas_access_token cookie, and issues a final 302 back
+          to the original protected URL.
+    4. GET <BASE_URL>/<USERNAME>/ with the dtaas_access_token cookie -> expect HTTP 200.
 
 TLS verification:
     By default Python's certifi bundle is used.  When testing against a
@@ -193,7 +194,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Automate the OAuth2/OIDC login flow against a local Dex provider "
-            "for headless CI testing with traefik-forward-auth."
+            "for headless CI testing with Oathkeeper + login-relay."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,

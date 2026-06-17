@@ -111,7 +111,33 @@
   mutators:
     - handler: header
 
-# Rule 4: login-relay and logout — public, no authentication required.
+# Rule 4: workspace-redirect — resolves username from cookie and redirects to /{username}/{path}.
+# Uses noop auth so the login-relay endpoint handles its own cookie check and
+# redirects unauthenticated users to /login-relay internally.
+- id: dtaas-workspace-redirect
+  version: "v0.36.0-beta.1"
+  description: >
+    Public pass-through to the login-relay /workspace-redirecttree endpoint.
+    The DTaaS SPA builds iframe URLs as REACT_APP_URL + userName + LIBLINK +
+    "tree/{dir}". With an empty GitLab userName and LIBLINK="workspace-redirect"
+    this produces /workspace-redirecttree/{dir} (no slash between LIBLINK and
+    the literal "tree" suffix). Login-relay reads the dtaas_access_token cookie
+    and issues a 302 to /{username}/tree/{dir}.
+  match:
+    url: "<^https?://[^/]*/workspace-redirecttree(/.*)?$>"
+    methods:
+      - GET
+      - HEAD
+  upstream:
+    url: http://login-relay:8080
+  authenticators:
+    - handler: noop
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
+
+# Rule 5: login-relay and logout — public, no authentication required.
 - id: dtaas-login-relay-public
   version: "v0.36.0-beta.1"
   description: >

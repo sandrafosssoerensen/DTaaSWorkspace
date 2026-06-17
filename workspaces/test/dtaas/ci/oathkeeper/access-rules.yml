@@ -1,0 +1,68 @@
+# CI access rules — Dex OIDC provider, TLS compose.
+#
+# Uses authorizer: allow for workspace rules because Dex tokens include a
+# "name" claim (not "username"/"preferred_username"), so the production
+# remote_json RBAC check would reject all requests.  Authentication via
+# oauth2_introspection is still tested end-to-end.
+
+# Rule 1: user1 workspace.
+- id: dtaas-user1-workspace
+  version: "v0.36.0-beta.1"
+  match:
+    url: "<^https?://[^/]*/user1(/.*)?$>"
+    methods: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS]
+  upstream:
+    url: http://user1:8080
+  authenticators:
+    - handler: oauth2_introspection
+      config:
+        token_from:
+          cookie: dtaas_access_token
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
+
+# Rule 2: user2 workspace.
+- id: dtaas-user2-workspace
+  version: "v0.36.0-beta.1"
+  match:
+    url: "<^https?://[^/]*/user2(/.*)?$>"
+    methods: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS]
+  upstream:
+    url: http://user2:8080
+  authenticators:
+    - handler: oauth2_introspection
+      config:
+        token_from:
+          cookie: dtaas_access_token
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
+
+# Rule 3: login-relay and logout — public.
+- id: dtaas-login-relay-public
+  version: "v0.36.0-beta.1"
+  match:
+    url: "<^https?://[^/]*/(login-relay.*|logout)$>"
+    methods: [GET]
+  authenticators:
+    - handler: noop
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
+
+# Rule 4: health check — public.
+- id: dtaas-public-health
+  version: "v0.36.0-beta.1"
+  match:
+    url: "<^https?://[^/]*/health$>"
+    methods: [GET, HEAD]
+  authenticators:
+    - handler: noop
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
