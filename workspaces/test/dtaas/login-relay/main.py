@@ -17,12 +17,11 @@ Architecture:
                      → sets dtaas_access_token cookie → /user1
 """
 import logging
+import time
 
 from fastapi import Cookie, FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
-
-import time
 
 from _config import KEYCLOAK_CLIENT_ID, SERVER_DNS
 from _helpers import (

@@ -4,13 +4,14 @@ headless CI testing with Oathkeeper + login-relay.
 
 Usage:
     ci_auth_login.py [BASE_URL] [USERNAME] [DEX_BASE_URL] [PASSWORD]
-                     [--no-verify | --ca-bundle PATH]
+                     [--path PATH] [--no-verify | --ca-bundle PATH]
 
 Defaults:
     BASE_URL     = http://localhost
     USERNAME     = user1
     DEX_BASE_URL = http://dex:5556
     PASSWORD     = password
+    PATH         = (empty — accesses /<USERNAME>/)
 
 Exit codes:
     0 – login succeeded and protected resource returned HTTP 200
@@ -135,7 +136,7 @@ def _verify_authenticated_access(
 
 
 def login(
-    base_url: str,
+    protected_url: str,
     username: str,
     dex_base_url: str,
     password: str,
@@ -144,7 +145,7 @@ def login(
     """Perform the full OAuth2 login flow.
 
     Args:
-        base_url: Base URL of the protected service (e.g. https://localhost).
+        protected_url: Full URL of the protected resource to verify after login.
         username: Workspace username to log in as.
         dex_base_url: Base URL of the Dex OIDC provider (e.g. http://dex:5556).
         password: Password for the user.
@@ -156,7 +157,6 @@ def login(
         True when authenticated access returns HTTP 200, False otherwise.
     """
     email = f"{username}@localhost"
-    protected_url = f"{base_url}/{username}/"
 
     session = requests.Session()
     session.verify = verify
@@ -224,6 +224,16 @@ def main() -> int:
         help="User password (default: password)",
     )
 
+    parser.add_argument(
+        "--path",
+        metavar="PATH",
+        default="",
+        help=(
+            "Sub-path within the user workspace to verify after login "
+            "(e.g. 'services').  Defaults to the workspace root '/<USERNAME>/'."
+        ),
+    )
+
     tls_group = parser.add_mutually_exclusive_group()
     tls_group.add_argument(
         "--no-verify",
@@ -255,8 +265,13 @@ def main() -> int:
     else:
         verify = True
 
+    clean_path = args.path.strip("/")
+    protected_url = (
+        f"{args.base_url}/{args.username}/{clean_path}" if clean_path
+        else f"{args.base_url}/{args.username}/"
+    )
     success = login(
-        base_url=args.base_url,
+        protected_url=protected_url,
         username=args.username,
         dex_base_url=args.dex_base_url,
         password=args.password,

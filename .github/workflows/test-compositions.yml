@@ -130,7 +130,7 @@ jobs:
             basic_test: false
             tls_test: true
             dex_test: true
-            no_forward_auth_service: false
+            no_forward_auth_service: true
             ignore_health_of_services: ""
         arch:
           - platform: linux/amd64
