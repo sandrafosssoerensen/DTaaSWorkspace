@@ -305,7 +305,7 @@ docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
   up -d --force-recreate oathkeeper login-relay
 ```
 
-### 5. Test Authentication
+### 6. Test Authentication
 
 1. Navigate to `https://foo.com/`
 2. You should be redirected to Keycloak login
