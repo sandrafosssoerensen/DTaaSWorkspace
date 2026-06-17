@@ -20,7 +20,7 @@ import logging
 from urllib.parse import quote
 
 from fastapi import Cookie, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from _config import KEYCLOAK_CLIENT_ID, SERVER_DNS
