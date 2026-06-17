@@ -18,6 +18,7 @@ Architecture:
 """
 import logging
 import time
+from urllib.parse import quote
 
 from fastapi import Cookie, FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, Response
@@ -55,12 +56,13 @@ async def workspace_redirect(
     """
     claims = _decode_jwt_claims(dtaas_access_token)
     username = claims.get("preferred_username", "")
+    encoded_path = quote(path, safe="/")
     if not username or claims.get("exp", 0) <= time.time():
         return RedirectResponse(
-            url=f"/login-relay?return_to=/workspace-redirecttree/{path}",
+            url=f"/login-relay?return_to=/workspace-redirecttree/{encoded_path}",
             status_code=302,
         )
-    return RedirectResponse(url=f"/{username}/tree/{path}", status_code=302)
+    return RedirectResponse(url=f"/{username}/tree/{encoded_path}", status_code=302)
 
 
 @app.post("/authz/workspace/{path_prefix}", status_code=200)
