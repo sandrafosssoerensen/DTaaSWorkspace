@@ -188,6 +188,54 @@ The login-relay exchanges the auth code for a token using the client secret
    - **Add to access token**: ON
    - Click **Save**
 
+##### Public client (DTaaS SPA — `dtaas-client`)
+
+The DTaaS web client is a React SPA that uses **Authorization Code + PKCE**.
+This is a public client (no client secret).
+
+1. In the left sidebar, click **Clients**
+2. Click **Create client**
+3. Configure the client:
+   - **Client type**: OpenID Connect
+   - **Client ID**: `dtaas-client`
+   - Click **Next**
+4. Capability config:
+   - **Client authentication**: OFF (public client — no secret)
+   - **Authorization**: OFF
+   - **Authentication flow**: enable **Standard flow** only
+   - Click **Next**
+5. Login settings:
+   - **Root URL**: `https://<SERVER_DNS>`
+   - **Valid redirect URIs**: `https://<SERVER_DNS>/*`
+   - **Valid post logout redirect URIs**: `https://<SERVER_DNS>/*`
+   - **Web origins**: `https://<SERVER_DNS>`
+   - Click **Save**
+6. Enforce PKCE:
+   - Go to the **Advanced** tab
+   - Under **Advanced Settings**, set
+     **Proof Key for Code Exchange Code Challenge Method** to `S256`
+   - Click **Save**
+7. Add a `username` claim mapper so the SPA receives the username in the token:
+   - Go to the **Client Scopes** tab
+   - Click **`dtaas-client-dedicated`**
+   - Click **Add mapper** → **By configuration** → **User Property**
+   - Fill in:
+     - **Name**: `username`
+     - **Property**: `username`
+     - **Token Claim Name**: `username`
+     - **Claim JSON Type**: `String`
+     - **Add to ID token**: ON
+     - **Add to access token**: ON
+     - **Add to userinfo**: ON
+   - Click **Save**
+
+   > **Note**: The SPA receives `username` in its token but does not use it to
+   > construct workspace tool URLs directly — those go through `workspace-redirect/`
+   > regardless. The double slash sometimes visible in workbench URLs (e.g.
+   > `//workspace-redirect/tools/vscode`) is a SPA URL-concatenation quirk
+   > (it appends an extra `/` when joining `REACT_APP_URL` and `WORKBENCHLINK_*`
+   > values) and is harmless — browsers normalise `//path` to `/path`.
+
 #### Create Users
 
 1. In the left sidebar, click **Users**
@@ -206,7 +254,36 @@ The login-relay exchanges the auth code for a token using the client secret
    - Click **Save**
 6. Repeat for additional users (e.g., `user2`)
 
-### 4. Restart Services
+### 4. Configure `client.js`
+
+The DTaaS web client reads its configuration from `config/client.js`
+(volume-mounted, gitignored — copy from `config/client.js.example` as a starting
+point).
+
+Copy `config/client.js.example` to `config/client.js` and replace all
+occurrences of `<your-domain>` with your domain name (`SERVER_DNS`).
+
+The example is pre-configured for Keycloak with `workspace-redirect/` as the
+prefix for all workspace links. The login-relay resolves the authenticated
+user's username from the session cookie and redirects to `/{username}/{path}`,
+so a single static `client.js` works for all users without hardcoding a username.
+
+Key values already set in the example:
+
+```javascript
+REACT_APP_URL: 'https://<your-domain>/',
+REACT_APP_URL_LIBLINK: 'workspace-redirect/',
+REACT_APP_URL_DTLINK: 'workspace-redirect/lab',
+REACT_APP_WORKBENCHLINK_VNCDESKTOP: 'workspace-redirect/tools/vnc/',
+REACT_APP_WORKBENCHLINK_VSCODE: 'workspace-redirect/tools/vscode/',
+REACT_APP_WORKBENCHLINK_JUPYTERLAB: 'workspace-redirect/lab',
+REACT_APP_CLIENT_ID: 'dtaas-client',
+REACT_APP_AUTH_AUTHORITY: 'https://<your-domain>/auth/realms/dtaas',
+REACT_APP_REDIRECT_URI: 'https://<your-domain>/library',
+REACT_APP_LOGOUT_REDIRECT_URI: 'https://<your-domain>/',
+```
+
+### 5. Restart Services
 
 After configuring Keycloak, restart the auth services so they pick up the
 new realm and client configuration.

@@ -19,8 +19,8 @@ Architecture:
 import logging
 from urllib.parse import quote
 
-from fastapi import Cookie, FastAPI, HTTPException
-from fastapi.responses import RedirectResponse, Response
+from fastapi import Cookie, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from _config import KEYCLOAK_CLIENT_ID, SERVER_DNS
@@ -51,27 +51,58 @@ class _AuthzBody(BaseModel):
     subject: _AuthzSubject = Field(default_factory=_AuthzSubject)
 
 
-@app.get("/workspace-redirecttree/{path:path}")
-async def workspace_redirect(
+@app.get("/workspace-redirect/{path:path}")
+async def workspace_redirect_generic(
+    request: Request,
     path: str,
     dtaas_access_token: str = Cookie(default=""),
 ) -> RedirectResponse:
-    """Redirect to the authenticated user's Jupyter tree path.
+    """Redirect to the authenticated user's workspace path.
 
-    The SPA constructs iframes as REACT_APP_URL + userName + LIBLINK + "tree/{dir}".
-    With an empty GitLab userName, the generated URL is
-    /workspace-redirecttree/{dir} (LIBLINK="workspace-redirect", no separator).
-    This endpoint reads preferred_username from the cookie and redirects to
-    /{username}/tree/{path} so all users share one static client.js.
+    Handles all library links when REACT_APP_URL_LIBLINK='workspace-redirect/'.
+    The SPA constructs file links as {REACT_APP_URL}workspace-redirect/{path} and
+    tree links as {REACT_APP_URL}workspace-redirect/tree/{dir}.
+    Reads preferred_username from the dtaas_access_token cookie and redirects to
+    /{username}/{path}, allowing a single static client.js to serve all users.
     """
     encoded_path = quote(path, safe="/")
+    query = request.url.query
+    target_path = f"{encoded_path}?{query}" if query else encoded_path
     username = _active_username(dtaas_access_token)
     if not username:
+        return_to = quote(f"/workspace-redirect/{target_path}", safe="/?=&")
         return RedirectResponse(
-            url=f"/login-relay?return_to=/workspace-redirecttree/{encoded_path}",
+            url=f"/login-relay?return_to={return_to}",
             status_code=302,
         )
-    return RedirectResponse(url=f"/{username}/tree/{encoded_path}", status_code=302)
+    return RedirectResponse(url=f"/{username}/{target_path}", status_code=302)
+
+
+@app.get("/workspace-redirecttree/{path:path}")
+async def workspace_redirect_tree(
+    request: Request,
+    path: str,
+    dtaas_access_token: str = Cookie(default=""),
+) -> RedirectResponse:
+    """Redirect to the authenticated user's workspace tree path.
+
+    Handles library folder-browser iframe links. The SPA strips the trailing slash
+    from REACT_APP_URL_LIBLINK before appending 'tree/{dir}', producing paths like
+    /workspace-redirecttree/{dir} instead of /workspace-redirect/tree/{dir}.
+    Reads preferred_username from the dtaas_access_token cookie and redirects to
+    /{username}/tree/{dir}.
+    """
+    encoded_path = quote(path, safe="/")
+    query = request.url.query
+    target_path = f"{encoded_path}?{query}" if query else encoded_path
+    username = _active_username(dtaas_access_token)
+    if not username:
+        return_to = quote(f"/workspace-redirecttree/{target_path}", safe="/?=&")
+        return RedirectResponse(
+            url=f"/login-relay?return_to={return_to}",
+            status_code=302,
+        )
+    return RedirectResponse(url=f"/{username}/tree/{target_path}", status_code=302)
 
 
 @app.post("/authz/workspace/{path_prefix}", status_code=200)

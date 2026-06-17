@@ -112,17 +112,42 @@
     - handler: header
 
 # Rule 4: workspace-redirect — resolves username from cookie and redirects to /{username}/{path}.
-# Uses noop auth so the login-relay endpoint handles its own cookie check and
-# redirects unauthenticated users to /login-relay internally.
-- id: dtaas-workspace-redirect
+# Used for library file links when REACT_APP_URL_LIBLINK='workspace-redirect'.
+# The SPA constructs these as {REACT_APP_URL}workspace-redirect/{path}.
+- id: dtaas-workspace-redirect-generic
+  version: "v0.36.0-beta.1"
+  description: >
+    Public pass-through to the login-relay /workspace-redirect endpoint.
+    The SPA constructs library file links as {REACT_APP_URL}workspace-redirect/{path}
+    (REACT_APP_URL_LIBLINK='workspace-redirect'). Login-relay reads the
+    dtaas_access_token cookie and issues a 302 to /{username}/{path}.
+  match:
+    url: "<^https?://[^/]*/workspace-redirect(/.*)?$>"
+    methods:
+      - GET
+      - HEAD
+  upstream:
+    url: http://login-relay:8080
+  authenticators:
+    - handler: noop
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: noop
+
+# Rule 5: workspace-redirecttree — SPA folder-browser iframe pattern.
+# The SPA strips the trailing slash from REACT_APP_URL_LIBLINK before appending
+# 'tree/{dir}', producing /workspace-redirecttree/{dir} instead of
+# /workspace-redirect/tree/{dir}. Public pass-through to login-relay which resolves
+# the username from the dtaas_access_token cookie and redirects to /{username}/tree/{dir}.
+- id: dtaas-workspace-redirecttree
   version: "v0.36.0-beta.1"
   description: >
     Public pass-through to the login-relay /workspace-redirecttree endpoint.
-    The DTaaS SPA builds iframe URLs as REACT_APP_URL + userName + LIBLINK +
-    "tree/{dir}". With an empty GitLab userName and LIBLINK="workspace-redirect"
-    this produces /workspace-redirecttree/{dir} (no slash between LIBLINK and
-    the literal "tree" suffix). Login-relay reads the dtaas_access_token cookie
-    and issues a 302 to /{username}/tree/{dir}.
+    Handles library folder-browser iframe links where the SPA concatenates LIBLINK and
+    'tree/{dir}' without a path separator, yielding /workspace-redirecttree/{dir}.
+    Login-relay reads the dtaas_access_token cookie and issues a 302 to
+    /{username}/tree/{dir}.
   match:
     url: "<^https?://[^/]*/workspace-redirecttree(/.*)?$>"
     methods:
@@ -137,7 +162,7 @@
   mutators:
     - handler: noop
 
-# Rule 5: login-relay and logout — public, no authentication required.
+# Rule 6: login-relay and logout — public, no authentication required.
 - id: dtaas-login-relay-public
   version: "v0.36.0-beta.1"
   description: >
@@ -153,7 +178,7 @@
   mutators:
     - handler: noop
 
-# Rule 5: health check — public, no authentication required.
+# Rule 7: health check — public, no authentication required.
 - id: dtaas-public-health
   version: "v0.36.0-beta.1"
   description: >
