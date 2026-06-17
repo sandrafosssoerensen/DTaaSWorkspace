@@ -308,6 +308,25 @@ class TestCallback:
 # GET /workspace-redirect/{path}
 # ---------------------------------------------------------------------------
 
+class TestWorkspaceRedirectRoot:
+    """Tests for GET /workspace-redirect and /workspace-redirect/ (empty path)."""
+
+    def test_authenticated_redirects_to_user_root(self):
+        """Valid cookie redirects to /{username}/."""
+        future = int(time.time()) + 3600
+        token = _make_jwt({"preferred_username": "user1", "exp": future})
+        c = TestClient(app, follow_redirects=False, cookies={"dtaas_access_token": token})
+        resp = c.get("/workspace-redirect/")
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/user1/"
+
+    def test_missing_cookie_redirects_to_login(self):
+        """Missing cookie triggers login redirect."""
+        resp = client.get("/workspace-redirect/")
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/login-relay?return_to=/workspace-redirect/"
+
+
 class TestWorkspaceRedirectGeneric:
     """Tests for the /workspace-redirect/{path} cookie-to-username redirect.
 
@@ -350,7 +369,9 @@ class TestWorkspaceRedirectGeneric:
         c = TestClient(app, follow_redirects=False, cookies={"dtaas_access_token": token})
         resp = c.get("/workspace-redirect/tools/vscode/")
         assert resp.status_code == 302
-        assert resp.headers["location"] == "/login-relay?return_to=/workspace-redirect/tools/vscode/"
+        assert resp.headers["location"] == (
+            "/login-relay?return_to=/workspace-redirect/tools/vscode/"
+        )
 
     def test_missing_cookie_redirects_to_login(self):
         """Missing cookie triggers login redirect, preserving the original path."""
@@ -396,13 +417,17 @@ class TestWorkspaceRedirectTree:
         c = TestClient(app, follow_redirects=False, cookies={"dtaas_access_token": token})
         resp = c.get("/workspace-redirecttree/functions")
         assert resp.status_code == 302
-        assert resp.headers["location"] == "/login-relay?return_to=/workspace-redirecttree/functions"
+        assert resp.headers["location"] == (
+            "/login-relay?return_to=/workspace-redirecttree/functions"
+        )
 
     def test_missing_cookie_redirects_to_login(self):
         """Missing cookie triggers login redirect, preserving the original path."""
         resp = client.get("/workspace-redirecttree/functions")
         assert resp.status_code == 302
-        assert resp.headers["location"] == "/login-relay?return_to=/workspace-redirecttree/functions"
+        assert resp.headers["location"] == (
+            "/login-relay?return_to=/workspace-redirecttree/functions"
+        )
 
 
 # ---------------------------------------------------------------------------
