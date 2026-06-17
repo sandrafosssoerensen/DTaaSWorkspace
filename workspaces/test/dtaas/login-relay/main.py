@@ -51,6 +51,25 @@ class _AuthzBody(BaseModel):
     subject: _AuthzSubject = Field(default_factory=_AuthzSubject)
 
 
+@app.get("/workspace-redirect")
+@app.get("/workspace-redirect/")
+async def workspace_redirect_root(
+    dtaas_access_token: str = Cookie(default=""),
+) -> RedirectResponse:
+    """Redirect to the authenticated user's Jupyter root (Notebook interface).
+
+    Handles REACT_APP_WORKBENCHLINK_JUPYTERNOTEBOOK='workspace-redirect/' where
+    the SPA produces an empty path after the prefix.
+    """
+    username = _active_username(dtaas_access_token)
+    if not username:
+        return RedirectResponse(
+            url="/login-relay?return_to=/workspace-redirect/",
+            status_code=302,
+        )
+    return RedirectResponse(url=f"/{username}/", status_code=302)
+
+
 @app.get("/workspace-redirect/{path:path}")
 async def workspace_redirect_generic(
     request: Request,
