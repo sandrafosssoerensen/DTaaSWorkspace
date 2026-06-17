@@ -52,7 +52,11 @@ def _expected_issuer() -> str:
 
 
 def _decode_jwt_claims(token: str) -> dict:
-    """Extract JWT payload claims without signature verification (loop detection only)."""
+    """Extract JWT payload claims without signature verification.
+
+    Used for redirect resolution, cross-user access checks, and expiry checks.
+    Never use the returned claims for access control — use JWKS-verified tokens only.
+    """
     try:
         parts = token.split(".")
         if len(parts) != 3:
@@ -92,14 +96,19 @@ def _safe_return_to(return_to: str) -> str:
     return path
 
 
+def _active_username(token: str) -> str:
+    """Return preferred_username from a valid non-expired token, or '' otherwise."""
+    claims = _decode_jwt_claims(token)
+    if int(claims.get("exp", 0) or 0) <= time.time():
+        return ""
+    return claims.get("preferred_username", "")
+
+
 def _check_cross_user_redirect(token: str, destination: str) -> None:
     """Raise 403 if a valid token owner tries to access another user's workspace."""
     if not token:
         return
-    claims = _decode_jwt_claims(token)
-    if claims.get("exp", 0) <= time.time():
-        return
-    username = claims.get("preferred_username", "")
+    username = _active_username(token)
     if not username:
         return
     for prefix in WORKSPACE_PREFIXES:
@@ -150,7 +159,7 @@ async def _validate_id_token(id_token: str) -> None:
             resp.raise_for_status()
             jwks_data = resp.json()
     except Exception as exc:
-        logging.error("Failed to fetch JWKS: %s", exc)
+        logging.error("Failed to fetch JWKS: %s", type(exc).__name__)
         raise HTTPException(status_code=502, detail="Failed to fetch JWKS.") from exc
     try:
         key_set = JsonWebKey.import_key_set(jwks_data)
@@ -164,7 +173,7 @@ async def _validate_id_token(id_token: str) -> None:
         )
         claims.validate()
     except JoseError as exc:
-        logging.warning("id_token validation failed: %s", exc)
+        logging.warning("id_token validation failed: %s", type(exc).__name__)
         raise HTTPException(status_code=401, detail="id_token validation failed.") from exc
 
 
@@ -182,7 +191,7 @@ async def _fetch_tokens(code: str) -> tuple[str, str, int]:
                 code=code,
             )
         except Exception as exc:
-            logging.error("Token exchange failed: %s", exc)
+            logging.error("Token exchange failed: %s", type(exc).__name__)
             raise HTTPException(status_code=502, detail="Token exchange failed.") from exc
     access_token = token.get("access_token", "")
     if not access_token:

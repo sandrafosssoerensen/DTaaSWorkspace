@@ -4,12 +4,14 @@
 import base64
 import json
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from authlib.jose import RSAKey, jwt as authlib_jwt
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from main import app
-from _helpers import _decode_jwt_claims, _is_routable, _safe_return_to
+from _helpers import _decode_jwt_claims, _is_routable, _safe_return_to, _validate_id_token
 
 client = TestClient(app, follow_redirects=False)
 
@@ -336,3 +338,121 @@ class TestWorkspaceRedirectTree:
         assert resp.status_code == 302
         expected = "/login-relay?return_to=/workspace-redirecttree/functions"
         assert resp.headers["location"] == expected
+
+
+# ---------------------------------------------------------------------------
+# _validate_id_token (JWKS signature verification)
+# ---------------------------------------------------------------------------
+
+# RSA key pair generated once for the whole test session.
+_TEST_RSA_KEY = RSAKey.generate_key(2048, is_private=True)
+_TEST_JWKS = {"keys": [_TEST_RSA_KEY.as_dict(is_private=False)]}
+# Expected issuer matches _helpers._expected_issuer() with test env vars:
+#   KEYCLOAK_PUBLIC_URL defaults to "https://localhost/auth", KEYCLOAK_REALM="dtaas"
+_TEST_ISSUER = "https://localhost/auth/realms/dtaas"
+_TEST_CLIENT_ID = "dtaas-workspace"
+
+
+def _signed_id_token(claims: dict) -> str:
+    """Return a signed RS256 JWT for use in _validate_id_token tests."""
+    return authlib_jwt.encode({"alg": "RS256"}, claims, _TEST_RSA_KEY).decode()
+
+
+def _mock_jwks_client(jwks: dict) -> AsyncMock:
+    """Return an async context manager mock whose .get() returns jwks."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = jwks
+    mock_resp.raise_for_status = MagicMock()
+    mock_http = AsyncMock()
+    mock_http.get = AsyncMock(return_value=mock_resp)
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    return mock_http
+
+
+class TestValidateIdToken:
+    """Tests for _validate_id_token JWKS signature and claims verification."""
+
+    async def test_valid_token_does_not_raise(self):
+        """A properly signed token with correct iss/aud/exp passes validation."""
+        token = _signed_id_token({
+            "iss": _TEST_ISSUER,
+            "aud": _TEST_CLIENT_ID,
+            "exp": int(time.time()) + 3600,
+            "iat": int(time.time()),
+            "sub": "user1",
+        })
+        with patch("_helpers.httpx.AsyncClient", return_value=_mock_jwks_client(_TEST_JWKS)):
+            await _validate_id_token(token)  # must not raise
+
+    async def test_tampered_signature_raises_401(self):
+        """A token whose signature has been modified is rejected with 401."""
+        token = _signed_id_token({
+            "iss": _TEST_ISSUER,
+            "aud": _TEST_CLIENT_ID,
+            "exp": int(time.time()) + 3600,
+        })
+        header, payload, _ = token.split(".")
+        tampered = f"{header}.{payload}.invalidsignature"
+        with patch("_helpers.httpx.AsyncClient", return_value=_mock_jwks_client(_TEST_JWKS)):
+            try:
+                await _validate_id_token(tampered)
+                assert False, "Expected HTTPException"
+            except HTTPException as exc:
+                assert exc.status_code == 401
+
+    async def test_jwks_fetch_failure_raises_502(self):
+        """A network error fetching JWKS raises 502."""
+        mock_http = AsyncMock()
+        mock_http.get = AsyncMock(side_effect=Exception("Connection refused"))
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=None)
+        with patch("_helpers.httpx.AsyncClient", return_value=mock_http):
+            try:
+                await _validate_id_token("any.token.here")
+                assert False, "Expected HTTPException"
+            except HTTPException as exc:
+                assert exc.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# _fetch_tokens failure
+# ---------------------------------------------------------------------------
+
+class TestFetchTokensFailure:
+    """Tests for token-exchange error handling in the callback endpoint."""
+
+    def test_token_exchange_failure_returns_502(self):
+        """A failed token exchange propagates as HTTP 502 to the caller."""
+        nonce = "failnonce123"
+        return_to_b64 = base64.urlsafe_b64encode(b"/user1/lab").decode()
+        c = TestClient(
+            app, follow_redirects=False,
+            cookies={"oauth_state": f"{nonce}:{return_to_b64}"},
+        )
+        with patch(
+            "main._fetch_tokens",
+            new=AsyncMock(side_effect=HTTPException(
+                status_code=502, detail="Token exchange failed."
+            )),
+        ):
+            resp = c.get(f"/login-relay/callback?code=authcode&state={nonce}")
+        assert resp.status_code == 502
+
+    def test_id_token_validation_failure_returns_401(self):
+        """A failed id_token validation propagates as HTTP 401 to the caller."""
+        nonce = "failnonce456"
+        return_to_b64 = base64.urlsafe_b64encode(b"/user1/lab").decode()
+        c = TestClient(
+            app, follow_redirects=False,
+            cookies={"oauth_state": f"{nonce}:{return_to_b64}"},
+        )
+        with patch("main._fetch_tokens", new=AsyncMock(return_value=("token", "id-token", 3600))):
+            with patch(
+                "main._validate_id_token",
+                new=AsyncMock(side_effect=HTTPException(
+                    status_code=401, detail="id_token validation failed."
+                )),
+            ):
+                resp = c.get(f"/login-relay/callback?code=authcode&state={nonce}")
+        assert resp.status_code == 401

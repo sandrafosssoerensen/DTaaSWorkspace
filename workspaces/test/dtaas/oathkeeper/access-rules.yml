@@ -1,7 +1,7 @@
 # DTaaS Oathkeeper access rules.
 # Oathkeeper validates tokens via Keycloak token introspection (authentication).
-# Authorization (RBAC) is handled by OPA, linked to the workspace nginx —
-# Oathkeeper and OPA are decoupled.
+# Authorization (RBAC) is delegated to login-relay via the remote_json authorizer
+# on workspace rules, which checks that the token's username matches the path prefix.
 #
 # IMPORTANT — Oathkeeper v26 with regexp matching_strategy requires EXACTLY ONE
 # rule to match per request. Overlapping rules cause a 500 "multiple rules" error.
@@ -20,7 +20,7 @@
     validated via Keycloak introspection.
     Proxies to the DTaaS web client. Covers the SPA root and known sub-paths.
   match:
-    url: "<^https?://[^/]*(/($|library(/.*)?$|digitaltwins(/.*)?$|preview(/.*)?$|create(/.*)?$|env\\.js$|static(/.*)?$|favicon\\.ico$|manifest\\.json$|logo.*$))?$>"
+    url: "<^https?://[^/]*(/($|library(/.*)?$|digitaltwins(/.*)?$|preview(/.*)?$|create(/.*)?$|env\\.js$|static(/.*)?$|favicon\\.ico$|manifest\\.json$|logo[^/]*\\.(png|svg|ico)$))?$>"
     methods:
       - GET
       - HEAD

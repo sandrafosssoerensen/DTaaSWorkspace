@@ -179,7 +179,7 @@ The login-relay exchanges the auth code for a token using the client secret
    - Copy the **Client secret** value
    - Update `KEYCLOAK_CLIENT_SECRET` in your `.env` file
 7. Add an Audience mapper so the JWT's `aud` claim contains `dtaas-workspace`
-   (required by Oathkeeper's `target_audience` check):
+   (recommended if you later enable audience validation or need `aud` for downstream services):
    - Go to the **Client scopes** tab
    - Click `dtaas-workspace-dedicated`
    - Click **Add mapper** → **By configuration** → **Audience**

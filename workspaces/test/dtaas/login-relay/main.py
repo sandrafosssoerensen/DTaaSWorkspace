@@ -17,7 +17,6 @@ Architecture:
                      → sets dtaas_access_token cookie → /user1
 """
 import logging
-import time
 from urllib.parse import quote
 
 from fastapi import Cookie, FastAPI, HTTPException
@@ -26,8 +25,8 @@ from pydantic import BaseModel, Field
 
 from _config import KEYCLOAK_CLIENT_ID, SERVER_DNS
 from _helpers import (
-    _auth_url_public, _build_auth_params, _check_cross_user_redirect,
-    _decode_jwt_claims, _fetch_tokens, _generate_state, _public_realm_url,
+    _active_username, _auth_url_public, _build_auth_params,
+    _check_cross_user_redirect, _fetch_tokens, _generate_state, _public_realm_url,
     _safe_return_to, _set_access_token_cookie, _set_short_cookie,
     _validate_id_token, _verify_state,
 )
@@ -35,10 +34,21 @@ from _helpers import (
 app = FastAPI()
 
 
+class _AuthzExtra(BaseModel):
+    """Typed claims forwarded by Oathkeeper's remote_json authorizer."""
+
+    username: str = ""
+    preferred_username: str = ""
+
+
+class _AuthzSubject(BaseModel):
+    extra: _AuthzExtra = Field(default_factory=_AuthzExtra)
+
+
 class _AuthzBody(BaseModel):
     """Payload sent by Oathkeeper's remote_json authorizer."""
 
-    subject: dict = Field(default_factory=dict)
+    subject: _AuthzSubject = Field(default_factory=_AuthzSubject)
 
 
 @app.get("/workspace-redirecttree/{path:path}")
@@ -54,10 +64,9 @@ async def workspace_redirect(
     This endpoint reads preferred_username from the cookie and redirects to
     /{username}/tree/{path} so all users share one static client.js.
     """
-    claims = _decode_jwt_claims(dtaas_access_token)
-    username = claims.get("preferred_username", "")
     encoded_path = quote(path, safe="/")
-    if not username or claims.get("exp", 0) <= time.time():
+    username = _active_username(dtaas_access_token)
+    if not username:
         return RedirectResponse(
             url=f"/login-relay?return_to=/workspace-redirecttree/{encoded_path}",
             status_code=302,
@@ -68,12 +77,8 @@ async def workspace_redirect(
 @app.post("/authz/workspace/{path_prefix}", status_code=200)
 async def authorize_workspace(path_prefix: str, body: _AuthzBody) -> Response:
     """Verify via remote_json RBAC that token's username matches the path prefix."""
-    extra = body.subject.get("extra") or {}
-    username = extra.get("username") or extra.get("preferred_username", "")
-    logging.debug(
-        "authz/workspace/%s — username=%r extra_keys=%s",
-        path_prefix, username, sorted(extra.keys()),
-    )
+    username = body.subject.extra.username or body.subject.extra.preferred_username
+    logging.debug("authz/workspace/%s — username=%r", path_prefix, username)
     if not username or username != path_prefix:
         raise HTTPException(status_code=403, detail="Forbidden - wrong user")
     return Response(status_code=200)
