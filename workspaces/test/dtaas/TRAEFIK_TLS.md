@@ -108,9 +108,13 @@ Quick steps:
     the request to the workspace
 
 The `dtaas_access_token` cookie expires after 5 minutes (matching Keycloak's
-default access token lifetime). On expiry, Oathkeeper redirects silently to
-login-relay, which re-authenticates using Keycloak's SSO session
-(idle timeout: 30 minutes).
+default access token lifetime). When the cookie is absent (deleted or never set)
+or has expired, Oathkeeper rejects the request and redirects to login-relay.
+login-relay uses `prompt=login`, which instructs Keycloak to always show the
+login form — even if a Keycloak SSO session is still active. This ensures that
+deleting the cookie always forces a full re-login. If re-auth is triggered
+inside an iframe (e.g. on the Digital Twins page), the Keycloak login form will
+appear inside the iframe.
 
 ## :technologist: Accessing Workspaces
 

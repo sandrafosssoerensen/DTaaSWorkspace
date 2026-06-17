@@ -141,33 +141,31 @@ Create a copy of this example file without the example suffix:
 cp config/client.js.example config/client.js
 ```
 
-Then, edit the new DTaaS Web Client config file, updating the following values:
+Then replace all occurrences of `<your-domain>` with your domain name.
+
+### 🔗 Workspace Links
+
+All workspace tool and library links use the `workspace-redirect/` prefix.
+The login-relay service resolves the authenticated user's username from the
+session cookie and redirects to `/{username}/{path}`, allowing a single
+static `client.js` to serve all users without hardcoding a username.
 
 ### 🔑🖥️ Client OAuth2 Setup
 
-In addition, the DTaaS web client uses OAuth2 authorization as well.
-It needs a client application.
-The following steps explain creation of Client OAuth2 application
-on a Gitlab installation.
+The SPA uses a public Keycloak client (`dtaas-client`) for user authentication.
+Create it in Keycloak before starting the services:
 
-1. Go to your GitLab instance → Edit Profile Settings → Applications
-2. Create a new OAuth App with:
-   - **Application name**: DTaaS Workspace
-   - **Homepage URL**: `https://yourdomain.com`
-   - **Authorization callback URL**: `https://yourdomain.com/Library`
-   - **Scopes**: `openid`, `profile`, `read_user`, `read_repository`, `api`
-3. Save the **Client ID**
+1. Log in to Keycloak at `https://<your-domain>/auth`
+2. Select the `dtaas` realm → **Clients** → **Create client**
+3. Set:
+   - **Client ID**: `dtaas-client`
+   - **Client authentication**: Off (public client)
+   - **Valid redirect URIs**: `https://<your-domain>/library`
+   - **Web origins**: `https://<your-domain>`
+4. Save
 
-Create and update the DTaaS web client configuration.
-
-```bash
-cp workspaces/test/dtaas/config/client.js.example \
-  workspaces/test/dtaas/config/client.js
-```
-
-Update the `REACT_APP_CLIENT_ID` with the **Client ID** generated above
-and `REACT_APP_AUTH_AUTHORITY` with URL of your GitLab instance, for example
-`https://gitlab.com`.
+No further changes to `client.js` are needed — `REACT_APP_CLIENT_ID` is
+already set to `dtaas-client` in the example.
 
 ## 🔑 OAuth2 Configuration
 
@@ -285,12 +283,13 @@ To add a third user, add a new rule to `oathkeeper/access-rules.yml` following
 the pattern of the existing `dtaas-user1-workspace` rule. See
 [TRAEFIK_TLS.md](TRAEFIK_TLS.md) for the full example.
 
-### Audience Mapper (Required)
+### Audience Mapper (Optional)
 
-Oathkeeper validates the `aud` claim in the Keycloak JWT. You must add an
-Audience mapper to the Keycloak client so the JWT contains `dtaas-workspace`
-in its `aud` claim. See [KEYCLOAK_SETUP.md](KEYCLOAK_SETUP.md) — step 7 of the
-**Confidential client (Oathkeeper / login-relay)** section.
+An Audience mapper can be added to the Keycloak client so the JWT contains
+`dtaas-workspace` in its `aud` claim. This is recommended if you later enable
+audience validation or need `aud` for downstream services, but is not required
+by the default Oathkeeper configuration. See [KEYCLOAK_SETUP.md](KEYCLOAK_SETUP.md)
+— step 7 of the **Confidential client (Oathkeeper / login-relay)** section.
 
 ## 🚪 Traefik Forward Auth Configuration
 

@@ -150,7 +150,8 @@ workspaces/test/dtaas/
 │   │   ├── GET  /login-relay                     initiate Keycloak login; set oauth_state cookie
 │   │   ├── GET  /login-relay/callback            exchange code; set dtaas_access_token cookie
 │   │   ├── GET  /logout                          clear cookie; redirect to Keycloak end session
-│   │   ├── GET  /workspace-redirecttree/{path}   resolve username from cookie → 302 /{user}/tree/{path}
+│   │   ├── GET  /workspace-redirect/{path}       resolve username from cookie → 302 /{user}/{path}
+│   │   ├── GET  /workspace-redirecttree/{path}   SPA folder-browser iframe fix → 302 /{user}/tree/{path}
 │   │   └── POST /authz/workspace/{user}          remote_json RBAC endpoint (called by Oathkeeper)
 │   └── tests/
 │       ├── conftest.py                   sets required env vars before import
@@ -170,7 +171,7 @@ pytest tests/ -v
 
 ## Oathkeeper Access Rules
 
-There are five rules in `access-rules.yml`. Oathkeeper v26 requires exactly one rule to match per
+There are seven rules in `access-rules.yml`. Oathkeeper v26 requires exactly one rule to match per
 request — overlapping patterns cause a 500 "multiple rules matched" error, so each rule's URL
 pattern is non-overlapping by design.
 
@@ -180,7 +181,8 @@ pattern is non-overlapping by design.
 | `dtaas-user1-workspace` | `/${USERNAME1}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAME1}` |
 | `dtaas-user2-workspace` | `/${USERNAME2}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAME2}` |
 | *(user3, etc.)* | `/${USERNAMEn}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAMEn}` |
-| `dtaas-workspace-redirect` | `/workspace-redirecttree(/…)?` | `noop` | `allow` — login-relay resolves username from cookie and redirects to `/{user}/tree/{path}` |
+| `dtaas-workspace-redirect-generic` | `/workspace-redirect(/…)?` | `noop` | `allow` — login-relay resolves username from cookie and redirects to `/{user}/{path}` |
+| `dtaas-workspace-redirecttree` | `/workspace-redirecttree(/…)?` | `noop` | `allow` — handles SPA folder-browser iframe links where the SPA strips the trailing slash from `REACT_APP_URL_LIBLINK` before appending `tree/{dir}`, producing `/workspace-redirecttree/{dir}` instead of `/workspace-redirect/tree/{dir}` |
 | `dtaas-login-relay-public` | `/login-relay*`, `/logout` | `noop` | `allow` |
 | `dtaas-public-health` | `/health` | `noop` | `allow` |
 
@@ -235,9 +237,12 @@ See [`KEYCLOAK_SETUP.md`](KEYCLOAK_SETUP.md) for step-by-step Keycloak configura
 
 `dtaas_access_token` `max_age` is set to the `expires_in` value returned by Keycloak's token
 endpoint, so the cookie lifetime automatically matches the configured access token lifespan.
-When the token expires, the next browser request is redirected to Keycloak; `prompt=login`
-ensures Keycloak always shows the login form, even when an SSO session is still active.
-This means deleting the `dtaas_access_token` cookie forces a visible re-authentication.
+When the `dtaas_access_token` cookie is absent (deleted or never set) or has expired, the next
+browser request is rejected by Oathkeeper and redirected to login-relay. login-relay uses
+`prompt=login`, which instructs Keycloak to always show the login form — even if a Keycloak
+SSO session is still active. This ensures that deleting the cookie always forces a full
+re-login. If re-auth is triggered inside an iframe (e.g. on the Digital Twins page), the
+Keycloak login form will appear inside the iframe.
 
 Active WebSocket connections (VS Code, Jupyter terminals) will drop when the redirect happens,
 because the tab navigates away.
