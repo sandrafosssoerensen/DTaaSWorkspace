@@ -438,3 +438,21 @@ class TestFetchTokensFailure:
         ):
             resp = c.get(f"/login-relay/callback?code=authcode&state={nonce}")
         assert resp.status_code == 502
+
+    def test_id_token_validation_failure_returns_401(self):
+        """A failed id_token validation propagates as HTTP 401 to the caller."""
+        nonce = "failnonce456"
+        return_to_b64 = base64.urlsafe_b64encode(b"/user1/lab").decode()
+        c = TestClient(
+            app, follow_redirects=False,
+            cookies={"oauth_state": f"{nonce}:{return_to_b64}"},
+        )
+        with patch("main._fetch_tokens", new=AsyncMock(return_value=("token", "id-token", 3600))):
+            with patch(
+                "main._validate_id_token",
+                new=AsyncMock(side_effect=HTTPException(
+                    status_code=401, detail="id_token validation failed."
+                )),
+            ):
+                resp = c.get(f"/login-relay/callback?code=authcode&state={nonce}")
+        assert resp.status_code == 401
