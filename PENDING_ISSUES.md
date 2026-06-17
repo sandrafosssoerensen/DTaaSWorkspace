@@ -181,22 +181,6 @@ services = load_services(effective_prefix)
 
 ---
 
-### 7. Incorrect VNC Endpoint in Documentation
-
-**File:** `workspaces/src/admin/DOCUMENTATION.md` (line not specified)  
-**Link:** https://github.com/INTO-CPS-Association/workspace/pull/52#discussion_r2799846989
-
-**Issue:**
-The documented example response has an incorrect VNC endpoint template: it's missing the `%2F` separator after the path prefix and uses `{path-prefix}` while the implementation/template uses `{PATH_PREFIX}`. This will mislead consumers trying to construct the VNC URL.
-
-**Recommended Fix:**
-```json
-"endpoint": "tools/vnc?path={PATH_PREFIX}%2Ftools%2Fvnc%2Fwebsockify"
-```
-
-**Priority:** Medium - Incorrect documentation
-
----
 
 ### 8. Nginx Location Regex Not Anchored
 

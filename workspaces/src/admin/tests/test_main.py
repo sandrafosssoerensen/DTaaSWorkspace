@@ -168,7 +168,7 @@ def test_root_endpoint_version(test_client):
     response = test_client.get("/")
     data = response.json()
     assert "version" in data
-    assert data["version"] == "0.1.0"
+    assert data["version"] == "0.1.1"
 
 
 def test_health_endpoint_returns_json(test_client):

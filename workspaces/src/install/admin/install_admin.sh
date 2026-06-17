@@ -50,4 +50,9 @@ fi
 
 workspace-admin --version
 
+# Cleanup
+rm -rf /opt/admin
+rm -rf /home/kasm-default-profile/.cache/pypoetry/*
+rm -rf /home/kasm-default-profile/.cache/pipx/*
+
 echo "Admin Service installation complete"

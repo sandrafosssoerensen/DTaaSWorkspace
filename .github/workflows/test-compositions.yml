@@ -1,0 +1,161 @@
+name: Test All Compose Files
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-compose:
+    name: Validate Compositions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        compose-file:
+          - compose.traefik.yml
+          - compose.traefik.secure.yml
+          - compose.traefik.secure.tls.yml
+          - ci/compose.traefik.secure.yml
+          - ci/compose.traefik.secure.tls.yml
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Validate ${{ matrix.compose-file }} syntax
+        run: |
+          cp ./workspaces/test/dtaas/config/.env.example ./workspaces/test/dtaas/config/.env
+          docker compose -f workspaces/test/dtaas/${{ matrix.compose-file }} \
+          --env-file workspaces/test/dtaas/config/.env \
+          config --quiet
+          echo "✅ ${{ matrix.compose-file }} syntax is valid"
+
+  build-workspace-image:
+    name: Build and Cache Workspace Image
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    needs: validate-compose
+    runs-on: ${{ matrix.arch.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build and cache workspace image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: ./workspaces
+          file: workspaces/Dockerfile.ubuntu.noble.xfce
+          build-args: INSTALLATION=minimal
+          push: false
+          platforms: ${{ matrix.arch.platform }}
+          cache-from: |
+            type=gha,scope=${{ matrix.arch.platform }}
+          cache-to: |
+            type=gha,mode=max,scope=${{ matrix.arch.platform }}
+
+  test-compositions:
+    name: Test All Compositions
+    strategy:
+      fail-fast: false
+      matrix:
+        composition:
+          - compose_file: workspaces/test/dtaas/compose.yml
+            startup_timeout: 30
+            connectivity_endpoint: "http://localhost/user/services"
+            connectivity_expected_response_code: "200"
+            use_env_file: false
+            basic_test: true
+            tls_test: false
+            no_forward_auth_service: false
+            ignore_health_of_services: ""
+          - compose_file: workspaces/test/dtaas/compose.traefik.yml
+            startup_timeout: 0
+            connectivity_endpoint: "http://localhost/user/services"
+            connectivity_expected_response_code: "200"
+            use_env_file: false
+            basic_test: false
+            tls_test: false
+            no_forward_auth_service: true
+            ignore_health_of_services: ""
+          - compose_file: workspaces/test/dtaas/compose.traefik.secure.yml
+            startup_timeout: 60
+            connectivity_endpoint: "http://localhost/auth"
+            connectivity_expected_response_code: "303"
+            use_env_file: true
+            basic_test: false
+            tls_test: false
+            no_forward_auth_service: false
+            ignore_health_of_services: "dtaas-traefik-forward-auth-1"
+          - compose_file: workspaces/test/dtaas/compose.traefik.secure.tls.yml
+            startup_timeout: 60
+            connectivity_endpoint: "http://localhost/auth"
+            connectivity_expected_response_code: "301"
+            use_env_file: true
+            basic_test: false
+            tls_test: true
+            no_forward_auth_service: false
+            ignore_health_of_services: "dtaas-traefik-forward-auth-1"
+          - compose_file: workspaces/test/dtaas/ci/compose.traefik.secure.yml
+            startup_timeout: 180
+            connectivity_endpoint: ""
+            connectivity_expected_response_code: ""
+            use_env_file: true
+            basic_test: false
+            tls_test: false
+            dex_test: true
+            no_forward_auth_service: false
+            ignore_health_of_services: ""
+          - compose_file: workspaces/test/dtaas/ci/compose.traefik.secure.tls.yml
+            startup_timeout: 180
+            connectivity_endpoint: ""
+            connectivity_expected_response_code: ""
+            use_env_file: true
+            basic_test: false
+            tls_test: true
+            dex_test: true
+            no_forward_auth_service: false
+            ignore_health_of_services: ""
+        arch:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    needs: build-workspace-image
+    runs-on: ${{ matrix.arch.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Test composition with minimal image
+        uses: ./.github/actions/test-composition
+        with:
+          compose_file: ${{ matrix.composition.compose_file }}
+          platform: ${{ matrix.arch.platform }}
+          startup_timeout: ${{ matrix.composition.startup_timeout }}
+          connectivity_endpoint: ${{ matrix.composition.connectivity_endpoint }}
+          connectivity_expected_response_code: ${{ matrix.composition.connectivity_expected_response_code }}
+          use_env_file: ${{ matrix.composition.use_env_file }}
+          basic_test: ${{ matrix.composition.basic_test }}
+          tls_test: ${{ matrix.composition.tls_test }}
+          dex_test: ${{ matrix.composition.dex_test }}
+          no_forward_auth_service: ${{ matrix.composition.no_forward_auth_service }}
+          ignore_health_of_services: ${{ matrix.composition.ignore_health_of_services }}

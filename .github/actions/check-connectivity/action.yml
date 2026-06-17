@@ -1,0 +1,52 @@
+name: Check connectivity
+description: Check that the given URL returns the expected response code
+inputs:
+  url:
+    description: The URL to check
+    required: true
+  expected_response_code:
+    description: The expected HTTP response code
+    required: true
+  max_attempts:
+    description: Maximum number of attempts to check connectivity
+    required: false
+    default: 10
+  time_between_attempts:
+    description: Time in seconds to wait between attempts
+    required: false
+    default: 10
+runs:
+  using: "composite"
+  steps:
+    - name: Check connectivity
+      shell: bash
+      env:
+        MAX_ATTEMPTS: ${{ inputs.max_attempts }}
+        TIME_BETWEEN_ATTEMPTS: ${{ inputs.time_between_attempts }}
+        URL: ${{ inputs.url }}
+        EXPECTED_RESPONSE_CODE: ${{ inputs.expected_response_code }}
+      run: |
+        echo "Checking connectivity..."
+        attempt=0
+        while [ $attempt -lt $MAX_ATTEMPTS ]; do
+          attempt=$((attempt + 1))
+          printf "\nAttempt $attempt out of $MAX_ATTEMPTS\n"
+
+          response=$(curl -s -k -o /dev/null -w "%{http_code}" \
+               "$URL" 2>/dev/null || true)
+
+          if [ "$response" = "$EXPECTED_RESPONSE_CODE" ]; then
+            echo "✅ Connectivity check passed with response code $response"
+            break
+          fi
+
+          if [ $attempt -eq $MAX_ATTEMPTS ]; then
+            echo "❌ Connectivity check failed with response code $response"
+            echo "$FAILED"
+            exit 1
+          fi
+
+          echo "Got unexpected HTTP response: $response"
+          echo "⏳ Trying again in $TIME_BETWEEN_ATTEMPTS seconds"
+          sleep $TIME_BETWEEN_ATTEMPTS
+        done

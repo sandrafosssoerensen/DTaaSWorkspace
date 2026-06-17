@@ -1,0 +1,84 @@
+name: Check service health
+description: Check that all services in the composition are running
+inputs:
+  compose_file:
+    description: Path to the docker compose file to check
+    required: true
+  ignore_services:
+    description: Comma-separated list of service names to ignore in health check (e.g. "service1,service2")
+    required: false
+    default: ""
+  use_env_file:
+    description: Whether to use an .env file for environment variables in docker compose (true/false)
+    required: false
+    default: false
+  max_attempts:
+    description: Maximum number of attempts to check service status
+    required: false
+    default: 10
+  time_between_attempts:
+    description: Time in seconds to wait between attempts
+    required: false
+    default: 10
+runs:
+  using: "composite"
+  steps:
+    - name: Check service health
+      shell: bash
+      env:
+        MAX_ATTEMPTS: ${{ inputs.max_attempts }}
+        TIME_BETWEEN_ATTEMPTS: ${{ inputs.time_between_attempts }}
+        COMPOSE_FILE: ${{ inputs.compose_file }}
+        IGNORE_SERVICES: ${{ inputs.ignore_services }}
+        USE_ENV_FILE: ${{ inputs.use_env_file }}
+      run: |
+        if [ "$USE_ENV_FILE" = "true" ]; then
+          ENV_FILE_ARG="--env-file workspaces/test/dtaas/config/.env"
+        else
+          ENV_FILE_ARG=""
+        fi
+        echo "📊 Checking service status..."
+        attempt=0
+        if [ -n "$IGNORE_SERVICES" ]; then
+          echo "⚠️ Ignoring services: $IGNORE_SERVICES"
+          # Convert comma-separated list to jq filter
+          IGNORE_FILTER=$(echo "$IGNORE_SERVICES" | tr ',' '\n' | sed 's/^\s*//;s/\s*$//' | awk '{printf " and .Name != \"%s\"", $0}')
+          IGNORE_FILTER=${IGNORE_FILTER:5}  # Remove leading ' and '
+          FILTER="select(.State != \"running\" and ($IGNORE_FILTER))"
+        else
+          IGNORE_FILTER=""
+          FILTER="select(.State != \"running\")"
+        fi
+        while [ $attempt -lt $MAX_ATTEMPTS ]; do
+          attempt=$((attempt + 1))
+          printf "\nAttempt $attempt out of $MAX_ATTEMPTS\n"
+
+          docker compose -f $COMPOSE_FILE $ENV_FILE_ARG ps
+          echo "---"
+          SERVICES=$(docker compose -f $COMPOSE_FILE $ENV_FILE_ARG ps --format json)
+          if echo "$SERVICES" | head -1 | grep -q '^\['; then
+            # JSON array format
+            FAILED=$(echo "$SERVICES" | jq -r ".[] | $FILTER | .Name")
+          else
+            # Newline-delimited JSON format
+            FAILED=$(echo "$SERVICES" | jq -r "$FILTER | .Name")
+          fi
+
+          if [ ! -n "$FAILED" ]; then
+            echo "✅ All services are running"
+            break
+          fi
+
+          if [ $attempt -eq $MAX_ATTEMPTS ]; then
+            echo "❌ Some services did not start running within $(( (MAX_ATTEMPTS - 1) * TIME_BETWEEN_ATTEMPTS )) seconds:"
+            echo "Filtered services: $IGNORE_SERVICES"
+            echo "Applied jq filter: $FILTER"
+            echo "$FAILED"
+            exit 1
+          fi
+
+          echo "⏳ Some services are not yet running:"
+          echo "$FAILED"
+          echo "Trying again in $TIME_BETWEEN_ATTEMPTS seconds"
+          sleep $TIME_BETWEEN_ATTEMPTS
+        done

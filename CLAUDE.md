@@ -40,7 +40,7 @@ on URL paths:
 - Jupyter: `/`
 - Jupyter Lab: `/lab`
 - VS Code: `/tools/vscode`
-- VNC Desktop: `/tools/vnc?path=<user>%2Ftools%2Fvnc%2Fwebsockify`
+- VNC Desktop: `/tools/vnc`
 - Admin/Services API: `/{path-prefix}/services` (service discovery
   endpoint)
 

@@ -11,8 +11,7 @@ fi
 
 function cleanup {
     trap - SIGINT SIGTERM SIGQUIT SIGHUP ERR
-    kill -- -"${DTAAS_PROCS['nginx']}"
-    kill -- "$(jobs -p)"
+    pkill -P $$
     exit 0
 }
 

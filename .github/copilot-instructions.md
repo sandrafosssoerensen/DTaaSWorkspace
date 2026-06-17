@@ -133,7 +133,7 @@ When suggesting or making changes, ensure these commands pass:
 shellcheck workspaces/src/**/*.sh
 
 # Dockerfile
-hadolint workspaces/Dockerfile.ubuntu.noble.gnome
+hadolint workspaces/Dockerfile.ubuntu.noble.xfce
 
 # Docker Compose
 docker compose -f workspaces/test/dtaas/compose.yaml config

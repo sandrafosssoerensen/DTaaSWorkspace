@@ -33,7 +33,7 @@ curl http://localhost:8080/{path-prefix}/services
   "desktop": {
     "name": "Desktop",
     "description": "Virtual Desktop Environment",
-    "endpoint": "tools/vnc?path={PATH_PREFIX}%2Ftools%2Fvnc%2Fwebsockify"
+    "endpoint": "tools/vnc"
   },
   "vscode": {
     "name": "VS Code",
@@ -100,7 +100,7 @@ curl http://localhost:8091/{path-prefix}
 ```json
 {
   "service": "Workspace Admin Service",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "endpoints": {
     "/services": "Get list of available workspace services",
     "/health": "Health check endpoint"
