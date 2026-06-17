@@ -79,7 +79,7 @@ Oathkeeper is the proxy; Traefik is the TLS-terminating edge router.
 4. **login-relay** (`GET /login-relay`):
    - Generates a random CSRF state nonce
    - Stores `nonce:base64(return_to)` in a short-lived `oauth_state` HttpOnly cookie
-   - Redirects browser to Keycloak's `/auth` endpoint (authorization code flow, `prompt=login`)
+   - Redirects browser to Keycloak's `/auth` endpoint (authorization code flow, `max_age=300`)
 5. **Keycloak** presents the login form; user authenticates
 6. **Keycloak** redirects to `https://shared.example.com/login-relay/callback?code=…&state=<nonce>`
 7. **login-relay** (`GET /login-relay/callback`):
@@ -170,7 +170,7 @@ pytest tests/ -v
 
 ## Oathkeeper Access Rules
 
-There are five rules in `access-rules.yml`. Oathkeeper v26 requires exactly one rule to match per
+There are six rules in `access-rules.yml`. Oathkeeper v26 requires exactly one rule to match per
 request — overlapping patterns cause a 500 "multiple rules matched" error, so each rule's URL
 pattern is non-overlapping by design.
 
@@ -235,9 +235,10 @@ See [`KEYCLOAK_SETUP.md`](KEYCLOAK_SETUP.md) for step-by-step Keycloak configura
 
 `dtaas_access_token` `max_age` is set to the `expires_in` value returned by Keycloak's token
 endpoint, so the cookie lifetime automatically matches the configured access token lifespan.
-When the token expires, the next browser request is redirected to Keycloak; `prompt=login`
-ensures Keycloak always shows the login form, even when an SSO session is still active.
-This means deleting the `dtaas_access_token` cookie forces a visible re-authentication.
+When the token expires, the next browser request is redirected to Keycloak; `max_age=300`
+ensures Keycloak requires re-authentication if the user last authenticated more than 300 seconds
+ago (matching the token lifespan). Iframes that trigger re-auth within the 5-minute window
+re-auth silently without showing a login form.
 
 Active WebSocket connections (VS Code, Jupyter terminals) will drop when the redirect happens,
 because the tab navigates away.

@@ -132,7 +132,7 @@ def _build_auth_params(nonce: str) -> str:
         "response_type": "code",
         "scope": "openid profile",
         "state": nonce,
-        "prompt": "login",
+        "max_age": 300,
     })
 
 
