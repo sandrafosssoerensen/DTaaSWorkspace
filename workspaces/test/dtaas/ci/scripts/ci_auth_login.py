@@ -136,35 +136,27 @@ def _verify_authenticated_access(
 
 
 def login(
-    base_url: str,
+    protected_url: str,
     username: str,
     dex_base_url: str,
     password: str,
     verify: Union[bool, str] = True,
-    path: str = "",
 ) -> bool:
     """Perform the full OAuth2 login flow.
 
     Args:
-        base_url: Base URL of the protected service (e.g. https://localhost).
+        protected_url: Full URL of the protected resource to verify after login.
         username: Workspace username to log in as.
         dex_base_url: Base URL of the Dex OIDC provider (e.g. http://dex:5556).
         password: Password for the user.
         verify: TLS verification – True uses the default certifi bundle,
                 False disables verification, or a filesystem path to a CA
                 bundle / directory of certificates.
-        path: Sub-path within the user workspace to verify (e.g. "services").
-              Defaults to root ("<username>/").
 
     Returns:
         True when authenticated access returns HTTP 200, False otherwise.
     """
     email = f"{username}@localhost"
-    clean_path = path.strip("/")
-    protected_url = (
-        f"{base_url}/{username}/{clean_path}" if clean_path
-        else f"{base_url}/{username}/"
-    )
 
     session = requests.Session()
     session.verify = verify
@@ -273,13 +265,17 @@ def main() -> int:
     else:
         verify = True
 
+    clean_path = args.path.strip("/")
+    protected_url = (
+        f"{args.base_url}/{args.username}/{clean_path}" if clean_path
+        else f"{args.base_url}/{args.username}/"
+    )
     success = login(
-        base_url=args.base_url,
+        protected_url=protected_url,
         username=args.username,
         dex_base_url=args.dex_base_url,
         password=args.password,
         verify=verify,
-        path=args.path,
     )
     return 0 if success else 1
 
