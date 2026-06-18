@@ -63,11 +63,18 @@ Browser → Traefik → Oathkeeper proxy (:4455) → workspace container
                     login-relay sets dtaas_access_token cookie
                           │ 302 → original workspace path
                           ▼
-                    Oathkeeper validates cookie → workspace container
+                    Oathkeeper → login-relay (/token/introspect) → Keycloak
+                          │ token active
+                          ▼
+                    workspace container
 ```
 
 Traefik routes workspace paths directly to the Oathkeeper proxy port (4455), not to a middleware.
 Oathkeeper is the proxy; Traefik is the TLS-terminating edge router.
+
+Login-relay acts as an OIDC gateway: Oathkeeper treats it as its OIDC provider
+and has no direct dependency on Keycloak. Login-relay forwards introspection
+requests to Keycloak and returns the response.
 
 ---
 
@@ -88,7 +95,7 @@ Oathkeeper is the proxy; Traefik is the TLS-terminating edge router.
    - Sets `dtaas_access_token` cookie (`HttpOnly`, `Secure`, `SameSite=Lax`, `max_age` = `expires_in` from token response)
    - Deletes `oauth_state` cookie
    - Redirects browser to the original path (`/user1/lab`)
-8. **Oathkeeper** reads `dtaas_access_token` cookie, introspects it against Keycloak → active → forwards to `http://user1:8080`
+8. **Oathkeeper** reads `dtaas_access_token` cookie, sends it to login-relay `POST /token/introspect` → login-relay forwards to Keycloak → active → Oathkeeper forwards to `http://user1:8080`
 
 > **Note:** This is a confidential authorization-code flow using a client secret, not PKCE.
 > The DTaaS frontend SPA uses its own separate PKCE flow for the UI session (a different client,
@@ -150,9 +157,12 @@ workspaces/test/dtaas/
 │   │   ├── GET  /login-relay                     initiate Keycloak login; set oauth_state cookie
 │   │   ├── GET  /login-relay/callback            exchange code; set dtaas_access_token cookie
 │   │   ├── GET  /logout                          clear cookie; redirect to Keycloak end session
+│   │   ├── GET  /workspace-redirect              resolve username from cookie → 302 /{user}/ (Jupyter root)
+│   │   ├── GET  /workspace-redirect/             same as above (empty path after prefix)
 │   │   ├── GET  /workspace-redirect/{path}       resolve username from cookie → 302 /{user}/{path}
 │   │   ├── GET  /workspace-redirecttree/{path}   SPA folder-browser iframe fix → 302 /{user}/tree/{path}
-│   │   └── POST /authz/workspace/{user}          remote_json RBAC endpoint (called by Oathkeeper)
+│   │   ├── POST /authz/workspace/{user}          remote_json RBAC endpoint (called by Oathkeeper)
+│   │   └── POST /token/introspect               OIDC gateway — proxies introspection to Keycloak (Oathkeeper calls this)
 │   └── tests/
 │       ├── conftest.py                   sets required env vars before import
 │       └── test_main.py                  unit + integration tests for all endpoints and helpers
@@ -223,8 +233,6 @@ See [`KEYCLOAK_SETUP.md`](KEYCLOAK_SETUP.md) for step-by-step Keycloak configura
 | `KEYCLOAK_PUBLIC_URL` | login-relay | Browser-facing Keycloak URL (for login redirect) |
 | `KEYCLOAK_INTERNAL_URL` | login-relay | Container-internal Keycloak URL (for token exchange) |
 | `KEYCLOAK_REALM` | login-relay, Oathkeeper | Keycloak realm name (`dtaas`) |
-| `KEYCLOAK_INTROSPECTION_URL` | Oathkeeper | Keycloak introspection endpoint URL |
-| `KEYCLOAK_INTROSPECTION_BASIC_AUTH` | Oathkeeper | Base64-encoded `client_id:secret` (computed by compose entrypoint) |
 | `USERNAME1`, `USERNAME2` | Oathkeeper | Workspace usernames (substituted into access rules at startup) |
 | `WORKSPACE_USERS` | login-relay | Comma-separated list of workspace usernames for redirect-loop detection (e.g. `user1,user2`) |
 | `LOGIN_RELAY_URL` | Oathkeeper | URL of the login-relay redirect target |

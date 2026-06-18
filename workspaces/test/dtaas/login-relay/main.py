@@ -19,15 +19,15 @@ Architecture:
 import logging
 from urllib.parse import quote
 
-from fastapi import Cookie, FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi import Cookie, FastAPI, Form, HTTPException, Request
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from _config import KEYCLOAK_CLIENT_ID, SERVER_DNS
 from _helpers import (
     _active_username, _auth_url_public, _build_auth_params,
-    _check_cross_user_redirect, _fetch_tokens, _generate_state, _public_realm_url,
-    _safe_return_to, _set_access_token_cookie, _set_short_cookie,
+    _check_cross_user_redirect, _fetch_tokens, _generate_state, _proxy_introspect,
+    _public_realm_url, _safe_return_to, _set_access_token_cookie, _set_short_cookie,
     _validate_id_token, _verify_state,
 )
 
@@ -155,6 +155,20 @@ async def login(
 async def health() -> Response:
     """Return 200 OK for liveness probes."""
     return Response(status_code=200)
+
+
+@app.post("/token/introspect")
+async def token_introspect(token: str = Form(default="")) -> JSONResponse:
+    """Proxy token introspection to Keycloak.
+
+    Oathkeeper calls this endpoint treating login-relay as the OIDC provider.
+    Login-relay forwards the request to Keycloak using its own client credentials
+    and returns the introspection response unmodified.
+    """
+    if not token:
+        return JSONResponse({"active": False})
+    result = await _proxy_introspect(token)
+    return JSONResponse(content=result)
 
 
 @app.get("/logout")

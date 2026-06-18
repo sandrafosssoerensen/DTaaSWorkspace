@@ -307,7 +307,7 @@ docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
 
 ### 6. Test Authentication
 
-1. Navigate to `https://foo.com/`
+1. Navigate to `https://<SERVER_DNS>/`
 2. You should be redirected to Keycloak login
 3. Login with one of the users you created
 4. You should be redirected back to the DTaaS interface

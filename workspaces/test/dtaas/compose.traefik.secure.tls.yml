@@ -143,10 +143,7 @@ services:
       - -c
     command:
       - |
-        KEYCLOAK_INTROSPECTION_BASIC_AUTH=$(printf '%s:%s' "$$KEYCLOAK_CLIENT_ID" "$$KEYCLOAK_CLIENT_SECRET" | base64 | tr -d '\n') &&
         sed \
-          -e 's|$${KEYCLOAK_INTROSPECTION_URL}|'"$$KEYCLOAK_INTROSPECTION_URL"'|g' \
-          -e 's|$${KEYCLOAK_INTROSPECTION_BASIC_AUTH}|'"$$KEYCLOAK_INTROSPECTION_BASIC_AUTH"'|g' \
           -e 's|$${LOGIN_RELAY_URL}|'"$$LOGIN_RELAY_URL"'|g' \
           /etc/oathkeeper/config/oathkeeper.yml > /tmp/oathkeeper.yml &&
         sed \
@@ -158,12 +155,6 @@ services:
       # Provides oathkeeper.yml and access-rules.yml to the container.
       - "./oathkeeper:/etc/oathkeeper/config"
     environment:
-      # Keycloak token introspection — validates tokens and checks active status.
-      # KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET are used to compute the
-      # HTTP Basic auth credential for the introspection endpoint at startup.
-      - KEYCLOAK_INTROSPECTION_URL=http://keycloak:8080/auth/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token/introspect
-      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
-      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
       - LOGIN_RELAY_URL=https://${SERVER_DNS:-localhost}/login-relay
       # Username path prefixes — substituted into access-rules.yml per-user upstreams.
       - USERNAME1=${USERNAME1:-user1}

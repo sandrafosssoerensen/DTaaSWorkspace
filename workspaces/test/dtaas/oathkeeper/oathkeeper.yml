@@ -1,8 +1,9 @@
 # ORY Oathkeeper configuration for DTaaS workspace authentication.
 #
 # Authentication:
-#   oauth2_introspection: Validates the dtaas_access_token cookie against
-#   Keycloak's introspection endpoint. Returns 401 if token is expired/revoked.
+#   oauth2_introspection: Validates the dtaas_access_token cookie via login-relay,
+#   which acts as an OIDC gateway and forwards the request to Keycloak.
+#   Returns 401 if token is expired/revoked.
 #
 # Authorization:
 #   remote_json: Calls login-relay /authz/workspace/<user> server-to-server.
@@ -62,12 +63,10 @@ authenticators:
   oauth2_introspection:
     enabled: true
     config:
-      introspection_url: "${KEYCLOAK_INTROSPECTION_URL}"
-      # Keycloak's introspection endpoint requires HTTP Basic authentication
-      # (client_id:client_secret). The base64-encoded credential is computed
-      # in the compose entrypoint script and injected here at startup.
-      introspection_request_headers:
-        Authorization: "Basic ${KEYCLOAK_INTROSPECTION_BASIC_AUTH}"
+      # login-relay acts as the OIDC gateway — it forwards introspection requests
+      # to Keycloak using its own client credentials and returns the response.
+      # Oathkeeper only needs to know about login-relay, not Keycloak directly.
+      introspection_url: "http://login-relay:8080/token/introspect"
 
 authorizers:
   allow:

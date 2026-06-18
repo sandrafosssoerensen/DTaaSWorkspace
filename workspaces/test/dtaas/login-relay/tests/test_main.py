@@ -191,6 +191,39 @@ class TestHealth:  # pylint: disable=too-few-public-methods
 
 
 # ---------------------------------------------------------------------------
+# POST /token/introspect
+# ---------------------------------------------------------------------------
+
+class TestTokenIntrospect:
+    """Tests for the POST /token/introspect OIDC gateway endpoint."""
+
+    def test_missing_token_returns_inactive(self):
+        """Request with no token returns {active: false} without calling Keycloak."""
+        resp = client.post("/token/introspect", data={})
+        assert resp.status_code == 200
+        assert resp.json() == {"active": False}
+
+    def test_valid_token_proxied_to_keycloak(self):
+        """Valid token is forwarded to Keycloak and the response is returned."""
+        keycloak_response = {"active": True, "username": "user1", "preferred_username": "user1"}
+        with patch("main._proxy_introspect", new=AsyncMock(return_value=keycloak_response)):
+            resp = client.post("/token/introspect", data={"token": "valid-jwt"})
+        assert resp.status_code == 200
+        assert resp.json() == keycloak_response
+
+    def test_keycloak_unreachable_returns_502(self):
+        """Upstream failure raises 502."""
+        with patch(
+            "main._proxy_introspect",
+            new=AsyncMock(side_effect=HTTPException(
+                status_code=502, detail="Introspection upstream unreachable."
+            )),
+        ):
+            resp = client.post("/token/introspect", data={"token": "some-token"})
+        assert resp.status_code == 502
+
+
+# ---------------------------------------------------------------------------
 # /logout
 # ---------------------------------------------------------------------------
 

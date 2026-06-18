@@ -17,8 +17,8 @@ from fastapi.responses import RedirectResponse
 
 from _config import (
     KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET, KEYCLOAK_INTERNAL_URL,
-    KEYCLOAK_PUBLIC_URL, KEYCLOAK_REALM, OIDC_AUTH_URL_PUBLIC, OIDC_ISSUER,
-    OIDC_JWKS_URL_INTERNAL, OIDC_TOKEN_URL_INTERNAL, SERVER_DNS,
+    KEYCLOAK_PUBLIC_URL, KEYCLOAK_REALM, OIDC_AUTH_URL_PUBLIC, OIDC_INTROSPECTION_URL_INTERNAL,
+    OIDC_ISSUER, OIDC_JWKS_URL_INTERNAL, OIDC_TOKEN_URL_INTERNAL, SERVER_DNS,
     SPA_PREFIXES, WORKSPACE_PREFIXES,
 )
 
@@ -45,6 +45,10 @@ def _token_url_internal() -> str:
 
 def _jwks_url_internal() -> str:
     return OIDC_JWKS_URL_INTERNAL or f"{_internal_realm_url()}/certs"
+
+
+def _introspection_url_internal() -> str:
+    return OIDC_INTROSPECTION_URL_INTERNAL or f"{_internal_realm_url()}/token/introspect"
 
 
 def _expected_issuer() -> str:
@@ -150,6 +154,29 @@ def _verify_state(oauth_state: str, state: str) -> str:
         return _safe_return_to(return_to)
     except (ValueError, binascii.Error):
         return "/"
+
+
+async def _proxy_introspect(token: str) -> dict:
+    """Forward a token introspection request to Keycloak and return the response.
+
+    Login-relay acts as an OIDC gateway: Oathkeeper calls this endpoint and
+    login-relay forwards to Keycloak using its own client credentials.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(
+                _introspection_url_internal(),
+                data={"token": token},
+                auth=(KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET),
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            logging.error("Introspection proxy failed: %s", type(exc).__name__)
+            raise HTTPException(
+                status_code=502, detail="Introspection upstream unreachable."
+            ) from exc
 
 
 async def _validate_id_token(id_token: str) -> None:
