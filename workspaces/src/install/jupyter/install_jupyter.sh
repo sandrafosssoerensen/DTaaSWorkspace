@@ -9,7 +9,7 @@ DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install
 
 python3 -m venv /opt/jupyter-env
 /opt/jupyter-env/bin/pip install --no-cache-dir \
-    jupyterlab \
-    notebook
+    jupyterlab==4.3.4 \
+    notebook==7.3.2
 
 ln -s /opt/jupyter-env/bin/jupyter /usr/local/bin/jupyter

@@ -13,6 +13,16 @@
 # loops: after Keycloak login the user lands at the SPA root instead of looping.
 
 # Rule 1: SPA gateway — known SPA paths require an active token (cookie).
+#
+# NOTE — X-User-* header spoofing on the SPA route:
+# The noop mutator means Oathkeeper does not set X-User-Name/Subject/Groups
+# for SPA requests, so Traefik does not inject those authResponseHeaders here.
+# However, Traefik does not strip inbound X-User-* headers by default, so a
+# client-supplied X-User-Name could reach client:4000 on this route.
+# The DTaaS SPA (client:4000) does not currently trust these headers for access
+# control — it reads identity from the Keycloak token directly. If that ever
+# changes, add a Traefik middleware to strip inbound X-User-* headers on this
+# route before enabling header-based authz on the SPA.
 - id: dtaas-spa-gateway
   version: "v0.36.0-beta.1"
   description: >

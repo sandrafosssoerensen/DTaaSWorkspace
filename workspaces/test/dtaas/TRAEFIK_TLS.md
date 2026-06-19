@@ -104,8 +104,8 @@ Quick steps:
    (server-to-server)
 9. login-relay sets the `dtaas_access_token` HttpOnly Secure cookie and
    redirects to the original URL
-10. Oathkeeper validates the JWT, injects identity headers, and proxies
-    the request to the workspace
+10. Oathkeeper introspects the token via login-relay, injects identity headers,
+    and approves the request; Traefik then proxies it to the workspace
 
 The `dtaas_access_token` cookie expires after 5 minutes (matching Keycloak's
 default access token lifetime). When the cookie is absent (deleted or never set)

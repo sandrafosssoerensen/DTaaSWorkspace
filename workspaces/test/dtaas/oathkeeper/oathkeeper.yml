@@ -11,12 +11,12 @@
 #
 # Session lifecycle:
 #   - Browser authenticates via authorization-code flow; login-relay sets dtaas_access_token cookie
-#   - Cookie max_age=300 matches Keycloak access token lifespan (5 min)
+#   - Cookie max_age matches the token's expires_in from the authorization-code exchange
 #   - On expiry, Oathkeeper redirects to login-relay to re-authenticate
 #
 # User identity headers (X-User-Name, X-User-Subject, X-User-Groups) are injected
 # by the header mutator and forwarded by Traefik's forwardAuth to upstream services.
-# Fine-grained RBAC is handled separately by workspace nginx.
+# Path-based routing to workspace containers is handled by Traefik rules (not nginx).
 # Traefik uses the decision API (port 4456) via forwardAuth middleware.
 
 serve:

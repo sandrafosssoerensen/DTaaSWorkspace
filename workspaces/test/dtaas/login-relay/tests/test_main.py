@@ -11,7 +11,10 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from main import app
-from _helpers import _decode_jwt_claims, _is_routable, _safe_return_to, _validate_id_token
+from _helpers import (
+    _active_username, _decode_jwt_claims, _is_routable, _proxy_introspect,
+    _safe_return_to, _validate_id_token,
+)
 
 client = TestClient(app, follow_redirects=False)
 
@@ -340,7 +343,8 @@ _TEST_CLIENT_ID = "dtaas-workspace"
 
 def _signed_id_token(claims: dict) -> str:
     """Return a signed RS256 JWT for use in _validate_id_token tests."""
-    return authlib_jwt.encode({"alg": "RS256"}, claims, _TEST_RSA_KEY).decode()
+    kid = _TEST_RSA_KEY.as_dict(is_private=False)["kid"]
+    return authlib_jwt.encode({"alg": "RS256", "kid": kid}, claims, _TEST_RSA_KEY).decode()
 
 
 def _mock_jwks_client(jwks: dict) -> AsyncMock:
@@ -441,3 +445,82 @@ class TestFetchTokensFailure:
             ):
                 resp = c.get(f"/login-relay/callback?code=authcode&state={nonce}")
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# _proxy_introspect — unit tests for new branches
+# ---------------------------------------------------------------------------
+
+def _mock_introspect_http(status_code: int, body: object) -> AsyncMock:
+    """Build an AsyncMock httpx.AsyncClient whose POST returns status_code + body."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    mock_resp.json.return_value = body
+    mock_http = AsyncMock()
+    mock_http.post = AsyncMock(return_value=mock_resp)
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    return mock_http
+
+
+class TestProxyIntrospect:
+    """Unit tests for the _proxy_introspect helper (new branches)."""
+
+    async def test_http_400_returns_inactive(self):
+        """HTTP 400 from the introspection endpoint returns {active: False}."""
+        with patch("_helpers.httpx.AsyncClient", return_value=_mock_introspect_http(400, {})):
+            result = await _proxy_introspect("some-token")
+        assert result == {"active": False}
+
+    async def test_http_500_returns_inactive(self):
+        """HTTP 500 from the introspection endpoint returns {active: False}."""
+        with patch("_helpers.httpx.AsyncClient", return_value=_mock_introspect_http(500, {})):
+            result = await _proxy_introspect("some-token")
+        assert result == {"active": False}
+
+    async def test_missing_active_field_returns_inactive(self):
+        """A 200 response without an 'active' key is treated as inactive."""
+        body = {"username": "user1"}
+        with patch("_helpers.httpx.AsyncClient", return_value=_mock_introspect_http(200, body)):
+            result = await _proxy_introspect("some-token")
+        assert result == {"active": False}
+
+    async def test_non_bool_active_returns_inactive(self):
+        """A 200 response where 'active' is a string (not bool) is treated as inactive."""
+        body = {"active": "true"}
+        with patch("_helpers.httpx.AsyncClient", return_value=_mock_introspect_http(200, body)):
+            result = await _proxy_introspect("some-token")
+        assert result == {"active": False}
+
+    async def test_valid_active_true_returned(self):
+        """A valid 200 response with boolean active=True is returned as-is."""
+        body = {"active": True, "username": "user1"}
+        with patch("_helpers.httpx.AsyncClient", return_value=_mock_introspect_http(200, body)):
+            result = await _proxy_introspect("some-token")
+        assert result == body
+
+
+# ---------------------------------------------------------------------------
+# _active_username — non-numeric exp guard
+# ---------------------------------------------------------------------------
+
+class TestActiveUsername:
+    """Tests for the _active_username exp-guard fix."""
+
+    def test_non_numeric_exp_returns_empty(self):
+        """Token with a non-numeric exp claim is treated as expired."""
+        token = _make_jwt({"sub": "user1", "preferred_username": "user1", "exp": "not-a-number"})
+        assert _active_username(token) == ""
+
+    def test_valid_future_exp_returns_username(self):
+        """Token with a future numeric exp returns the preferred_username."""
+        token = _make_jwt({
+            "sub": "user1", "preferred_username": "user1",
+            "exp": int(time.time()) + 3600,
+        })
+        assert _active_username(token) == "user1"
+
+    def test_expired_token_returns_empty(self):
+        """Token whose exp is in the past returns empty string."""
+        token = _make_jwt({"sub": "user1", "preferred_username": "user1", "exp": 1})
+        assert _active_username(token) == ""

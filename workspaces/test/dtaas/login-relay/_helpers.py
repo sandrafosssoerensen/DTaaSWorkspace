@@ -103,7 +103,12 @@ def _safe_return_to(return_to: str) -> str:
 def _active_username(token: str) -> str:
     """Return preferred_username from a valid non-expired token, or '' otherwise."""
     claims = _decode_jwt_claims(token)
-    if int(claims.get("exp", 0) or 0) <= time.time():
+    try:
+        exp = int(claims.get("exp", 0) or 0)
+    except (TypeError, ValueError):
+        logging.warning("Token has non-numeric exp claim; treating as expired.")
+        return ""
+    if exp <= time.time():
         return ""
     return claims.get("preferred_username", "")
 
@@ -176,8 +181,18 @@ async def _proxy_introspect(token: str) -> dict:
                 status_code=502, detail="Introspection upstream unreachable."
             ) from exc
         if resp.status_code >= 400:
+            logging.warning(
+                "Introspection returned HTTP %d; treating token as inactive.",
+                resp.status_code,
+            )
             return {"active": False}
-        return resp.json()
+        body = resp.json()
+        if not isinstance(body, dict) or not isinstance(body.get("active"), bool):
+            logging.warning(
+                "Introspection response missing boolean 'active'; treating as inactive."
+            )
+            return {"active": False}
+        return body
 
 
 async def _validate_id_token(id_token: str) -> None:

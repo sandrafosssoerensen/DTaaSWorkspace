@@ -269,8 +269,8 @@ Update the environment file, [`config/.env`](config/.env),
 Used by `compose.traefik.secure.tls.yml` only.
 
 Oathkeeper acts as an authenticating reverse proxy: Traefik routes all workspace
-and SPA traffic through it, and it validates the `dtaas_access_token` JWT cookie
-before forwarding requests to the upstream workspace containers.
+and SPA traffic through it, and it introspects the `dtaas_access_token` cookie
+via Keycloak (through login-relay) before approving requests to the upstream workspace containers.
 
 The access rules are pre-configured in
 [`oathkeeper/access-rules.yml`](./oathkeeper/access-rules.yml) for `USERNAME1`
