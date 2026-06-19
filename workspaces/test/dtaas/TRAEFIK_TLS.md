@@ -92,7 +92,7 @@ Quick steps:
 ## 🔒 Authentication Flow
 
 1. User navigates to a workspace or SPA URL over HTTPS
-2. Traefik routes the request to Oathkeeper (proxy port 4455)
+2. Traefik calls Oathkeeper's decision API (port 4456) via forwardAuth middleware
 3. Oathkeeper checks for a valid `dtaas_access_token` cookie (Keycloak JWT)
 4. If no valid token: Oathkeeper redirects to
    `/login-relay?return_to=<original-url>`
@@ -244,7 +244,8 @@ WORKSPACE_USERS=user1,user2,user3
       - "traefik.http.routers.u3.entryPoints=web-secure"
       - "traefik.http.routers.u3.rule=Host(`${SERVER_DNS}`) && PathPrefix(`/${USERNAME3:-user3}`)"
       - "traefik.http.routers.u3.tls=true"
-      - "traefik.http.routers.u3.service=oathkeeper-proxy@docker"
+      - "traefik.http.services.u3.loadbalancer.server.port=8080"
+      - "traefik.http.routers.u3.middlewares=oathkeeper-auth"
     networks:
       - users
 ```
@@ -274,8 +275,6 @@ set in step 1 — no further compose change is needed for login-relay.
       - PATCH
       - DELETE
       - OPTIONS
-  upstream:
-    url: http://user3:8080
   authenticators:
     - handler: oauth2_introspection
       config:

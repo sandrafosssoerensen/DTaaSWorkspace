@@ -33,11 +33,11 @@ User Request → Traefik → Forward Auth → Keycloak (OIDC)
 ### HTTPS / TLS (`compose.traefik.secure.tls.yml`)
 
 ```text
-User Request → Traefik → Oathkeeper proxy → workspace container
-                               ↓ no JWT
+User Request → Traefik → [forwardAuth: Oathkeeper :4456] → workspace container
+                               ↓ no token / expired
                          login-relay → Keycloak → login-relay/callback
                                ↓ sets dtaas_access_token cookie
-                         Oathkeeper → workspace container
+                         → workspace container
 ```
 
 ## Prerequisites

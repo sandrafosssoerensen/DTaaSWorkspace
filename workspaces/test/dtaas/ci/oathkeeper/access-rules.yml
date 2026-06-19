@@ -11,8 +11,6 @@
   match:
     url: "<^https?://[^/]*/user1(/.*)?$>"
     methods: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS]
-  upstream:
-    url: http://user1:8080
   authenticators:
     - handler: oauth2_introspection
       config:
@@ -29,8 +27,6 @@
   match:
     url: "<^https?://[^/]*/user2(/.*)?$>"
     methods: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS]
-  upstream:
-    url: http://user2:8080
   authenticators:
     - handler: oauth2_introspection
       config:

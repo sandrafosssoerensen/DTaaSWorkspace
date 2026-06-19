@@ -11,7 +11,7 @@ Flow:
      original destination.
 
 Architecture:
-  Traefik → Oathkeeper proxy:4455 → workspace containers
+  Traefik → forwardAuth → Oathkeeper decision API:4456 → workspace containers
                      ↓ no token + browser
              /login-relay?return_to=/user1 → OIDC → /login-relay/callback
                      → sets dtaas_access_token cookie → /user1

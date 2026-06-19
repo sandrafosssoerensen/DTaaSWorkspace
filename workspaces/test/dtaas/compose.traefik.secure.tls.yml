@@ -81,11 +81,10 @@ services:
       # Without this, containers with no EXPOSE directive are silently skipped and
       # all their labels (including the router rule) are ignored.
       - "traefik.http.services.client.loadbalancer.server.port=4000"
-      # Route through Oathkeeper proxy — the dtaas-spa-gateway access rule requires
-      # an active dtaas-workspace token (cookie: dtaas_access_token), validated via
-      # Keycloak introspection, before the SPA is shown.
-      # Unauthenticated requests are redirected to the login-relay → Keycloak login.
-      - "traefik.http.routers.client.service=oathkeeper-proxy@docker"
+      # Guard the SPA with Oathkeeper forwardAuth — the dtaas-spa-gateway access rule
+      # requires an active dtaas-workspace token (cookie: dtaas_access_token).
+      # Unauthenticated requests: Oathkeeper returns 302 → login-relay → Keycloak.
+      - "traefik.http.routers.client.middlewares=oathkeeper-auth"
     networks:
       - frontend
       - users
@@ -106,38 +105,42 @@ services:
       - "traefik.http.routers.u1.entryPoints=web-secure"
       - "traefik.http.routers.u1.rule=Host(`${SERVER_DNS}`) && PathPrefix(`/${USERNAME1:-user1}`)"
       - "traefik.http.routers.u1.tls=true"
-      # Route directly to Oathkeeper proxy — no forwardauth middleware.
-      - "traefik.http.routers.u1.service=oathkeeper-proxy@docker"
+      - "traefik.http.services.u1.loadbalancer.server.port=8080"
+      # Oathkeeper forwardAuth: decision API validates token and username before
+      # Traefik routes the request to the workspace container.
+      - "traefik.http.routers.u1.middlewares=oathkeeper-auth"
     networks:
       - users
 
   user2:
-    image: mltooling/ml-workspace-minimal:0.13.2
+    image: workspace:latest
     restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: Dockerfile.ubuntu.noble.xfce
+    environment:
+      - MAIN_USER=${USERNAME2:-user2}
     volumes:
       - "./files/common:/workspace/common"
       - "./files/${USERNAME2:-user2}:/workspace"
-    environment:
-      - AUTHENTICATE_VIA_JUPYTER=
-      - WORKSPACE_BASE_URL=${USERNAME2:-user2}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.u2.entryPoints=web-secure"
       - "traefik.http.routers.u2.rule=Host(`${SERVER_DNS}`) && PathPrefix(`/${USERNAME2:-user2}`)"
       - "traefik.http.routers.u2.tls=true"
-      # Route directly to Oathkeeper proxy — no forwardauth middleware.
-      - "traefik.http.routers.u2.service=oathkeeper-proxy@docker"
+      - "traefik.http.services.u2.loadbalancer.server.port=8080"
+      # Oathkeeper forwardAuth: decision API validates token and username before
+      # Traefik routes the request to the workspace container.
+      - "traefik.http.routers.u2.middlewares=oathkeeper-auth"
     networks:
       - users
 
   oathkeeper:
     image: oryd/oathkeeper:v26.2.0
     restart: unless-stopped
-    # Proxy port 4455: Traefik routes workspace paths here. Oathkeeper validates
-    # tokens via Keycloak introspection and proxies valid requests to the upstream
-    # workspace container.
-    # On auth failure it redirects browsers to the login-relay for Keycloak sign-in.
-    # Decision API port 4456: kept available for internal use / debugging.
+    # Decision API port 4456: Traefik's forwardAuth middleware calls this to validate
+    # tokens. On auth failure Oathkeeper returns 302 → login-relay → Keycloak login.
+    # Proxy port 4455 also starts but is not used by Traefik in this setup.
     entrypoint:
       - /bin/sh
       - -c
@@ -161,10 +164,12 @@ services:
       - USERNAME2=${USERNAME2:-user2}
     labels:
       - "traefik.enable=true"
-      # Expose the proxy port as a named Traefik service. User workspace routers
-      # reference this service so traffic flows: Traefik → Oathkeeper proxy → backend.
-      # No forwardauth middleware — Oathkeeper handles auth inline as a proxy.
-      - "traefik.http.services.oathkeeper-proxy.loadbalancer.server.port=4455"
+      # Defines the forwardAuth middleware used by all protected routers.
+      # Traefik calls http://oathkeeper:4456/decisions with X-Forwarded-* headers;
+      # Oathkeeper evaluates access rules and returns 200 (allow) or 302 (redirect).
+      # authResponseHeaders copies user-identity headers injected by the header mutator.
+      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.address=http://oathkeeper:4456/decisions"
+      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authResponseHeaders=X-User-Name,X-User-Subject,X-User-Groups"
     networks:
       - frontend
       - users

@@ -51,7 +51,7 @@ All authentication was handled as a Traefik middleware, with no per-user rule ca
 ### After (Oathkeeper + login-relay)
 
 ```
-Browser → Traefik → Oathkeeper proxy (:4455) → workspace container
+Browser → Traefik → [forwardAuth: Oathkeeper :4456] → workspace container
                           │ no token / expired
                           ▼
                     login-relay (/login-relay)
@@ -63,14 +63,14 @@ Browser → Traefik → Oathkeeper proxy (:4455) → workspace container
                     login-relay sets dtaas_access_token cookie
                           │ 302 → original workspace path
                           ▼
-                    Oathkeeper → login-relay (/token/introspect) → Keycloak
+                    Oathkeeper decision API → login-relay (/token/introspect) → Keycloak
                           │ token active
                           ▼
                     workspace container
 ```
 
-Traefik routes workspace paths directly to the Oathkeeper proxy port (4455), not to a middleware.
-Oathkeeper is the proxy; Traefik is the TLS-terminating edge router.
+Traefik uses Oathkeeper's decision API (port 4456) as a forwardAuth middleware.
+Traefik handles all routing; Oathkeeper only decides allow/deny.
 
 Login-relay acts as an OIDC gateway: Oathkeeper treats it as its OIDC provider
 and has no direct dependency on Keycloak. Login-relay forwards introspection

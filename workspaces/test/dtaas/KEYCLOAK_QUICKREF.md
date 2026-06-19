@@ -9,7 +9,7 @@ and traefik-forward-auth setup.
 ## Authentication Flow
 
 ```
-User → Traefik (TLS) → Oathkeeper proxy (:4455) → workspace / SPA
+User → Traefik (TLS) → [forwardAuth: Oathkeeper :4456] → workspace / SPA
                                ↓ no token / expired token
                         login-relay (/login-relay) → Keycloak (OIDC)
                                → /login-relay/callback → sets dtaas_access_token cookie

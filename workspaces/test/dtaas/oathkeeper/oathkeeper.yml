@@ -15,9 +15,9 @@
 #   - On expiry, Oathkeeper redirects to login-relay to re-authenticate
 #
 # User identity headers (X-User-Name, X-User-Subject, X-User-Groups) are injected
-# by the header mutator for upstream services.
+# by the header mutator and forwarded by Traefik's forwardAuth to upstream services.
 # Fine-grained RBAC is handled separately by workspace nginx.
-# Traefik routes workspace paths to the Oathkeeper proxy port (4455).
+# Traefik uses the decision API (port 4456) via forwardAuth middleware.
 
 serve:
   proxy:

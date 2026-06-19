@@ -63,9 +63,9 @@ services:
       - frontend
       - users
 
-  # ── Oathkeeper (token validation proxy) ───────────────────────────────────
-  # Validates dtaas_access_token cookies via Dex's introspection endpoint and
-  # proxies authenticated requests to the upstream workspace containers.
+  # ── Oathkeeper (forwardAuth decision API) ─────────────────────────────────
+  # Validates dtaas_access_token cookies via login-relay's introspection proxy.
+  # Traefik calls the decision API (port 4456) via forwardAuth middleware.
   oathkeeper:
     image: oryd/oathkeeper:v26.2.0
     restart: unless-stopped
@@ -74,10 +74,7 @@ services:
       - -c
     command:
       - |
-        KEYCLOAK_INTROSPECTION_BASIC_AUTH=$(printf '%s:%s' "$$KEYCLOAK_CLIENT_ID" "$$KEYCLOAK_CLIENT_SECRET" | base64 | tr -d '\n') &&
         sed \
-          -e 's|$${KEYCLOAK_INTROSPECTION_URL}|'"$$KEYCLOAK_INTROSPECTION_URL"'|g' \
-          -e 's|$${KEYCLOAK_INTROSPECTION_BASIC_AUTH}|'"$$KEYCLOAK_INTROSPECTION_BASIC_AUTH"'|g' \
           -e 's|$${LOGIN_RELAY_URL}|'"$$LOGIN_RELAY_URL"'|g' \
           /etc/oathkeeper/config/oathkeeper.yml > /tmp/oathkeeper.yml &&
         cp /etc/oathkeeper/rules/access-rules.yml /tmp/access-rules.yml &&
@@ -86,13 +83,11 @@ services:
       - "../oathkeeper:/etc/oathkeeper/config"
       - "./oathkeeper:/etc/oathkeeper/rules"
     environment:
-      - KEYCLOAK_INTROSPECTION_URL=http://dex:5556/dex/token/introspect
-      - KEYCLOAK_CLIENT_ID=dtaas-workspace
-      - KEYCLOAK_CLIENT_SECRET=ci-workspace-secret
       - LOGIN_RELAY_URL=https://localhost/login-relay
     labels:
       - "traefik.enable=true"
-      - "traefik.http.services.oathkeeper-proxy.loadbalancer.server.port=4455"
+      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.address=http://oathkeeper:4456/decisions"
+      - "traefik.http.middlewares.oathkeeper-auth.forwardauth.authResponseHeaders=X-User-Name,X-User-Subject,X-User-Groups"
     networks:
       - frontend
       - users
@@ -156,17 +151,17 @@ services:
       - "traefik.http.routers.u1.entryPoints=web-secure"
       - "traefik.http.routers.u1.rule=Host(`localhost`) && PathPrefix(`/user1`)"
       - "traefik.http.routers.u1.tls=true"
-      - "traefik.http.routers.u1.service=oathkeeper-proxy@docker"
+      - "traefik.http.services.u1.loadbalancer.server.port=8080"
+      - "traefik.http.routers.u1.middlewares=oathkeeper-auth"
     networks:
       - users
 
   # ── user2 workspace ────────────────────────────────────────────────────────
   user2:
-    image: mltooling/ml-workspace-minimal:0.13.2
+    image: workspace:latest
     restart: unless-stopped
     environment:
-      - AUTHENTICATE_VIA_JUPYTER=
-      - WORKSPACE_BASE_URL=user2
+      - MAIN_USER=user2
     volumes:
       - ./files/user2:/workspace
       - ./files/common:/workspace/common
@@ -176,7 +171,8 @@ services:
       - "traefik.http.routers.u2.entryPoints=web-secure"
       - "traefik.http.routers.u2.rule=Host(`localhost`) && PathPrefix(`/user2`)"
       - "traefik.http.routers.u2.tls=true"
-      - "traefik.http.routers.u2.service=oathkeeper-proxy@docker"
+      - "traefik.http.services.u2.loadbalancer.server.port=8080"
+      - "traefik.http.routers.u2.middlewares=oathkeeper-auth"
     networks:
       - users
 
