@@ -118,6 +118,7 @@ services:
       - OIDC_AUTH_URL_PUBLIC=http://dex:5556/dex/auth
       - OIDC_TOKEN_URL_INTERNAL=http://dex:5556/dex/token
       - OIDC_JWKS_URL_INTERNAL=http://dex:5556/dex/keys
+      - OIDC_INTROSPECTION_URL_INTERNAL=http://dex:5556/dex/token/introspection
       - OIDC_ISSUER=http://dex:5556/dex
       - WORKSPACE_USERS=user1,user2
     labels:

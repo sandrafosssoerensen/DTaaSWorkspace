@@ -41,6 +41,8 @@ class _AuthzExtra(BaseModel):
 
 
 class _AuthzSubject(BaseModel):
+    """Wraps the extra claims dict from Oathkeeper's remote_json subject payload."""
+
     extra: _AuthzExtra = Field(default_factory=_AuthzExtra)
 
 

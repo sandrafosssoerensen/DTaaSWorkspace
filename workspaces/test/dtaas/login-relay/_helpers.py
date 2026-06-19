@@ -170,13 +170,14 @@ async def _proxy_introspect(token: str) -> dict:
                 auth=(KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET),
                 timeout=10,
             )
-            resp.raise_for_status()
-            return resp.json()
         except Exception as exc:
             logging.error("Introspection proxy failed: %s", type(exc).__name__)
             raise HTTPException(
                 status_code=502, detail="Introspection upstream unreachable."
             ) from exc
+        if resp.status_code >= 400:
+            return {"active": False}
+        return resp.json()
 
 
 async def _validate_id_token(id_token: str) -> None:
