@@ -83,9 +83,9 @@ Quick steps:
 4. Create a **confidential** OIDC client named `dtaas-workspace` with redirect
    URI `https://<SERVER_DNS>/login-relay/callback`
 5. Copy the generated client secret and set `KEYCLOAK_CLIENT_SECRET` in `.env`
-6. Add an **Audience mapper** to `dtaas-workspace-dedicated` scope with
-   **Included Client Audience** set to `dtaas-workspace` (required for
-   Oathkeeper JWT validation)
+6. Optionally add an **Audience mapper** to `dtaas-workspace-dedicated` scope
+   with **Included Client Audience** set to `dtaas-workspace` (not required by
+   the current setup, which uses token introspection rather than JWT validation)
 7. Create users in Keycloak matching `USERNAME1` and `USERNAME2` from `.env`
 8. Restart the oathkeeper and login-relay services
 
@@ -294,9 +294,11 @@ set in step 1 — no further compose change is needed for login-relay.
     - handler: header
 ```
 
-Replace the literal `user3` in `upstream.url` with the actual username.
-The `${USERNAME3}` placeholders are substituted at Oathkeeper startup by the
-compose entrypoint.
+Replace `user3` in `upstream.url` with the Docker Compose service name of the
+workspace container (it must match the service name, not `${USERNAME3}`, because
+Oathkeeper resolves it as a DNS name at runtime).
+The `${USERNAME3}` placeholders elsewhere are substituted at Oathkeeper startup
+by the compose entrypoint.
 
 **Note**: Oathkeeper v26 with `regexp` matching strategy requires that URL
 patterns do not overlap. Verify no other rule's pattern matches the same URLs.
@@ -353,6 +355,23 @@ docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
    docker compose -f workspaces/test/dtaas/compose.traefik.secure.tls.yml \
      --env-file workspaces/test/dtaas/config/.env logs login-relay
    ```
+
+### ERR_TOO_MANY_REDIRECTS on Tool URLs
+
+**Problem**: Browser shows `ERR_TOO_MANY_REDIRECTS` when accessing
+`/user1/tools/vnc/` or similar tool paths.
+
+**Cause**: Oathkeeper v26 strips trailing slashes from URLs before forwarding
+to the upstream container. If the workspace nginx.conf contains a
+trailing-slash redirect (e.g. `return 302 $uri/`), the cycle becomes:
+browser → `/tools/vnc/` → Oathkeeper strips → `/tools/vnc` → nginx
+redirects → `/tools/vnc/` → loop.
+
+**Solution**: The workspace `nginx.conf` must not contain a generic
+trailing-slash redirect for tool paths. The VNC and VS Code location blocks
+handle both `/tools/vnc` and `/tools/vnc/` directly via the `/?$` pattern.
+If you have customised `workspaces/src/startup/nginx.conf`, verify no such
+redirect is present.
 
 ### Oathkeeper 500 — "Multiple Rules Matched"
 

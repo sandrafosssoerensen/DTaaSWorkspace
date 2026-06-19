@@ -144,7 +144,7 @@ loop.
 
 ```
 workspaces/test/dtaas/
-├── motivation.md                          ← this file
+├── MOTIVATION.md                          ← this file
 ├── oathkeeper/
 │   ├── oathkeeper.yml                     global Oathkeeper config (serve, authenticators, authorizers, mutators, errors)
 │   └── access-rules.yml                  per-route rules (template; env vars substituted at container startup)
@@ -152,15 +152,14 @@ workspaces/test/dtaas/
 │   ├── Dockerfile                         pinned python:3.12.9-slim; non-root appuser
 │   ├── requirements.txt                   FastAPI, uvicorn, authlib, httpx, pydantic
 │   ├── requirements-dev.txt               pytest (test dependencies, not installed in image)
+│   ├── _config.py                         env-var configuration constants
+│   ├── _helpers.py                        OIDC helpers, state/cookie utilities, RBAC check
 │   ├── main.py                           login relay service
 │   │   ├── GET  /health                          liveness probe (used by compose healthcheck)
 │   │   ├── GET  /login-relay                     initiate Keycloak login; set oauth_state cookie
 │   │   ├── GET  /login-relay/callback            exchange code; set dtaas_access_token cookie
 │   │   ├── GET  /logout                          clear cookie; redirect to Keycloak end session
-│   │   ├── GET  /workspace-redirect              resolve username from cookie → 302 /{user}/ (Jupyter root)
-│   │   ├── GET  /workspace-redirect/             same as above (empty path after prefix)
-│   │   ├── GET  /workspace-redirect/{path}       resolve username from cookie → 302 /{user}/{path}
-│   │   ├── GET  /workspace-redirecttree/{path}   SPA folder-browser iframe fix → 302 /{user}/tree/{path}
+│   │   ├── GET  /login-relay/logout              alias for /logout
 │   │   ├── POST /authz/workspace/{user}          remote_json RBAC endpoint (called by Oathkeeper)
 │   │   └── POST /token/introspect               OIDC gateway — proxies introspection to Keycloak (Oathkeeper calls this)
 │   └── tests/
@@ -181,7 +180,7 @@ pytest tests/ -v
 
 ## Oathkeeper Access Rules
 
-There are seven rules in `access-rules.yml`. Oathkeeper v26 requires exactly one rule to match per
+There are five rules in `access-rules.yml`. Oathkeeper v26 requires exactly one rule to match per
 request — overlapping patterns cause a 500 "multiple rules matched" error, so each rule's URL
 pattern is non-overlapping by design.
 
@@ -191,8 +190,6 @@ pattern is non-overlapping by design.
 | `dtaas-user1-workspace` | `/${USERNAME1}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAME1}` |
 | `dtaas-user2-workspace` | `/${USERNAME2}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAME2}` |
 | *(user3, etc.)* | `/${USERNAMEn}(/…)?` | `oauth2_introspection` (header or cookie) | `remote_json` → `/authz/workspace/${USERNAMEn}` |
-| `dtaas-workspace-redirect-generic` | `/workspace-redirect(/…)?` | `noop` | `allow` — login-relay resolves username from cookie and redirects to `/{user}/{path}` |
-| `dtaas-workspace-redirecttree` | `/workspace-redirecttree(/…)?` | `noop` | `allow` — handles SPA folder-browser iframe links where the SPA strips the trailing slash from `REACT_APP_URL_LIBLINK` before appending `tree/{dir}`, producing `/workspace-redirecttree/{dir}` instead of `/workspace-redirect/tree/{dir}` |
 | `dtaas-login-relay-public` | `/login-relay*`, `/logout` | `noop` | `allow` |
 | `dtaas-public-health` | `/health` | `noop` | `allow` |
 

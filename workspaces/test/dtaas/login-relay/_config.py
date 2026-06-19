@@ -16,8 +16,6 @@ WORKSPACE_PREFIXES = tuple(
 SPA_PREFIXES = (
     "/library", "/digitaltwins", "/preview", "/create",
     "/static", "/env.js", "/favicon.ico", "/manifest.json", "/logo",
-    "/workspace-redirect",
-    "/workspace-redirecttree",  # SPA strips trailing slash from LIBLINK + 'tree/{dir}'
 )
 
 # Optional OIDC URL overrides for non-Keycloak providers (e.g. Dex in CI).

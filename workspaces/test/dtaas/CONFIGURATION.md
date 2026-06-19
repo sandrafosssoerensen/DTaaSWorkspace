@@ -145,10 +145,9 @@ Then replace all occurrences of `<your-domain>` with your domain name.
 
 ### 🔗 Workspace Links
 
-All workspace tool and library links use the `workspace-redirect/` prefix.
-The login-relay service resolves the authenticated user's username from the
-session cookie and redirects to `/{username}/{path}`, allowing a single
-static `client.js` to serve all users without hardcoding a username.
+Workspace tool links use direct paths (e.g. `tools/vnc`, `tools/vscode/`, `lab`).
+The SPA uses the authenticated user's username from the Keycloak token to
+construct the full URL as `/{username}/{path}`.
 
 ### 🔑🖥️ Client OAuth2 Setup
 

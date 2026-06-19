@@ -229,12 +229,8 @@ This is a public client (no client secret).
      - **Add to userinfo**: ON
    - Click **Save**
 
-   > **Note**: The SPA receives `username` in its token but does not use it to
-   > construct workspace tool URLs directly — those go through `workspace-redirect/`
-   > regardless. The double slash sometimes visible in workbench URLs (e.g.
-   > `//workspace-redirect/tools/vscode`) is a SPA URL-concatenation quirk
-   > (it appends an extra `/` when joining `REACT_APP_URL` and `WORKBENCHLINK_*`
-   > values) and is harmless — browsers normalise `//path` to `/path`.
+   > **Note**: The SPA receives `username` in its token and uses it to construct
+   > workspace tool URLs directly (e.g. `/{username}/tools/vnc`).
 
 #### Create Users
 
@@ -263,20 +259,19 @@ point).
 Copy `config/client.js.example` to `config/client.js` and replace all
 occurrences of `<your-domain>` with your domain name (`SERVER_DNS`).
 
-The example is pre-configured for Keycloak with `workspace-redirect/` as the
-prefix for all workspace links. The login-relay resolves the authenticated
-user's username from the session cookie and redirects to `/{username}/{path}`,
-so a single static `client.js` works for all users without hardcoding a username.
+The example is pre-configured for Keycloak. The SPA uses the authenticated
+user's username (from the Keycloak token) to construct workspace tool URLs
+directly as `/{username}/{path}`.
 
 Key values already set in the example:
 
 ```javascript
 REACT_APP_URL: 'https://<your-domain>/',
-REACT_APP_URL_LIBLINK: 'workspace-redirect/',
-REACT_APP_URL_DTLINK: 'workspace-redirect/lab',
-REACT_APP_WORKBENCHLINK_VNCDESKTOP: 'workspace-redirect/tools/vnc/',
-REACT_APP_WORKBENCHLINK_VSCODE: 'workspace-redirect/tools/vscode/',
-REACT_APP_WORKBENCHLINK_JUPYTERLAB: 'workspace-redirect/lab',
+REACT_APP_URL_LIBLINK: '',
+REACT_APP_URL_DTLINK: '/lab',
+REACT_APP_WORKBENCHLINK_VNCDESKTOP: 'tools/vnc',
+REACT_APP_WORKBENCHLINK_VSCODE: 'tools/vscode/',
+REACT_APP_WORKBENCHLINK_JUPYTERLAB: 'lab',
 REACT_APP_CLIENT_ID: 'dtaas-client',
 REACT_APP_AUTH_AUTHORITY: 'https://<your-domain>/auth/realms/dtaas',
 REACT_APP_REDIRECT_URI: 'https://<your-domain>/library',
@@ -358,12 +353,20 @@ Use `compose.traefik.secure.tls.yml` for TLS/HTTPS in production.
 
 To use an external Keycloak instance (recommended for production):
 
-1. Update `KEYCLOAK_ISSUER_URL` in `.env`:
+1. Update the Keycloak URL variables in `.env`:
+
+   **For `compose.traefik.secure.tls.yml`** (Oathkeeper / login-relay):
+   ```bash
+   KEYCLOAK_PUBLIC_URL=https://keycloak.example.com/auth
+   KEYCLOAK_INTERNAL_URL=https://keycloak.example.com/auth
+   ```
+
+   **For `compose.traefik.secure.yml`** (traefik-forward-auth):
    ```bash
    KEYCLOAK_ISSUER_URL=https://keycloak.example.com/auth/realms/dtaas
    ```
 
-2. Optionally remove the `keycloak` service from `compose.traefik.secure.tls.yml`:
+2. Optionally remove the `keycloak` service from the relevant compose file:
    - Comment out or delete the `keycloak` service section
    - Remove `keycloak` from `depends_on` in both `oathkeeper` and `login-relay`
    - Remove the `keycloak-data` volume
@@ -435,11 +438,14 @@ To access custom user attributes:
 
 1. In Keycloak, create client scopes with mappers
 2. Assign scopes to the client
-3. Configure traefik-forward-auth to request additional scopes
+3. For `compose.traefik.secure.tls.yml`: scopes are configured in
+   `login-relay/_helpers.py` (`_build_auth_params` function)
 
 ### Role-Based Access Control (RBAC)
 
-RBAC is supported in Keycloak but not implemented in the traefik-forward-auth service by default.
+For `compose.traefik.secure.tls.yml`, RBAC is implemented via the
+`/authz/workspace/{user}` endpoint in `login-relay` — Oathkeeper calls this
+endpoint to verify that the token's username matches the requested path prefix.
 
 ### Single Sign-On (SSO)
 

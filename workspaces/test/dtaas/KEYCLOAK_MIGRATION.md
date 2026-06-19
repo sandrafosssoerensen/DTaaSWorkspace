@@ -1,5 +1,9 @@
 # Keycloak Integration - Migration Guide
 
+> **Note**: This document covers `compose.traefik.secure.yml` (HTTP, traefik-forward-auth).
+> For the TLS production setup with Oathkeeper, see
+> [TRAEFIK_TLS.md](TRAEFIK_TLS.md) and [KEYCLOAK_SETUP.md](KEYCLOAK_SETUP.md).
+
 This document describes the changes made to integrate Keycloak authentication into the DTaaS workspace deployment.
 
 ## What Changed
